@@ -18,7 +18,10 @@ async fn main() -> anyhow::Result<()> {
     info!("Database initialized");
 
     // Create application router
-    let app = Router::new().merge(api::viewer::create_router()).with_state(db);
+    let app = Router::new()
+        .merge(api::viewer::create_router())
+        .merge(api::session::create_router())
+        .with_state(db);
 
     // Start server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));

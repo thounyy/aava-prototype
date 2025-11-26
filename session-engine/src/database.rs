@@ -2,7 +2,7 @@ use sqlx::{PgPool, postgres::PgPoolOptions};
 use anyhow::Result;
 use tracing::info;
 
-const DATABASE_URL: &str = "postgresql://postgres:postgres@localhost:5432/aava";
+const DATABASE_URL: &str = "postgresql:///aava";
 
 pub async fn init() -> Result<PgPool> {
     // Create connection pool

@@ -6,6 +6,14 @@ use crate::models::session::*;
 use crate::sui;
 use crate::tee;
 
+pub fn create_router() -> Router<DbPool> {
+    Router::new().route("/api/sessions/open", post(open_session))
+    // .route("/api/account/get", get(get_account))
+    // .route("/api/account/exists", get(account_exists))
+    // .route("/api/sessions/open", post(open_session))
+    // .route("/api/permissions/check", post(check_permissions))
+}
+
 async fn open_session(
     State(db): State<DbPool>,
     Json(request): Json<OpenSessionRequest>,
@@ -71,26 +79,43 @@ async fn open_session(
     }))
 }
 
-// async fn check_permissions(
-//     State(_db): State<DbPool>,
-//     Json(request): Json<SessionRequest>,
-// ) -> Result<Json<PermissionCheck>, (StatusCode, String)> {
-//     info!(
-//         "Checking permissions for user {} on stream {}",
-//         request.user_id, request.stream_id
-//     );
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use axum::{body::Body, http::{Request, StatusCode}, Router};
+//     use tower::ServiceExt; // brings `oneshot` into scope
+//     use sqlx::PgPool;
 
-//     // Check permissions from Sui blockchain (on-chain)
-//     // Streams and subscriptions live on-chain, not in database
-//     let permission_check = sui::check_stream_permission(&request.user_id, &request.stream_id)
-//         .await
-//         .map_err(|e| {
-//             error!("Sui blockchain error: {}", e);
-//             (
-//                 StatusCode::INTERNAL_SERVER_ERROR,
-//                 format!("Failed to check permissions: {}", e),
+//     #[sqlx::test(migrator = "sqlx::migrate!()")]
+//     async fn open_session_inserts_row(pool: PgPool) {
+//         let app = Router::new()
+//             .route("/api/session/open", post(open_session))
+//             .with_state(pool.clone());
+
+//         let payload = OpenSessionRequest {
+//             viewer_id: "viewer-123".into(),
+//             stream_id: "stream-456".into(),
+//             // fill other fields if the struct requires them
+//         };
+
+//         let response = app
+//             .oneshot(
+//                 Request::post("/api/session/open")
+//                     .header("content-type", "application/json")
+//                     .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+//                     .unwrap(),
 //             )
-//         })?;
+//             .await
+//             .unwrap();
 
-//     Ok(Json(permission_check))
+//         assert_eq!(response.status(), StatusCode::OK);
+
+//         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM sessions WHERE viewer_id = $1")
+//             .bind(&payload.viewer_id)
+//             .fetch_one(&pool)
+//             .await
+//             .unwrap();
+
+//         assert_eq!(count.0, 1, "expected exactly one session row");
+//     }
 // }
