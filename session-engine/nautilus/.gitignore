@@ -1,0 +1,15 @@
+*.env
+user-data.sh
+trust-policy.json
+secrets-policy.json
+
+/move/enclave/build
+/move/*/build
+
+/src/nautilus-server/target
+
+/out
+/target
+
+.github # TODO: Remove later
+/move # TODO: Remove later
