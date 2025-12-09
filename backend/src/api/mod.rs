@@ -1,3 +1,3 @@
-pub mod viewer;
-pub mod session;
+pub mod viewers;
+pub mod sessions;
 pub mod actions;

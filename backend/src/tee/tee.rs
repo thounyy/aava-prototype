@@ -1,80 +1,158 @@
-// use uuid::Uuid;
-// use tracing::{info, warn};
-// use anyhow::Result;
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::env;
+use tracing::{error, info};
 
-// /// TEE module placeholder
-// /// 
-// /// In the real implementation, this would:
-// /// - Connect to a TEE cluster (e.g., AWS Nitro Enclaves, Intel SGX)
-// /// - Create a secure session object within the TEE
-// /// - Store session data in encrypted memory
-// /// - Generate attestation proofs
-// /// 
-// /// For now, this is a mock implementation that simulates TEE behavior.
+/// TEE client for communicating with Nautilus enclave
+///
+/// This module handles communication with the Nautilus enclave running
+/// in a TEE (Trusted Execution Environment). The enclave creates sessions
+/// and writes directly to the database.
 
-// pub struct TEESession {
-//     pub session_id: Uuid,
-//     pub user_id: String,
-//     pub stream_id: String,
-//     pub created_at: chrono::DateTime<chrono::Utc>,
-//     // In real TEE: encrypted session data, attestation proofs, etc.
-// }
+/// Response from the enclave for session creation
+#[derive(Debug, Serialize, Deserialize)]
+struct EnclaveSessionResponse {
+    session_id: String,
+    viewer_id: String,
+    stream_id: String,
+    status: String,
+}
 
-// /// Create a new session in the TEE
-// /// 
-// /// This is a placeholder that simulates TEE session creation.
-// /// In production, this would:
-// /// 1. Establish secure connection to TEE cluster
-// /// 2. Create encrypted session object in TEE memory
-// /// 3. Generate TEE attestation proof
-// /// 4. Return session ID and proof
-// pub async fn create_session(user_id: &str, stream_id: &str) -> Result<Uuid> {
-//     info!("[TEE PLACEHOLDER] Creating session in TEE for user {} on stream {}", user_id, stream_id);
-    
-//     // TODO: Real TEE implementation
-//     // - Connect to TEE cluster
-//     // - Create encrypted session object
-//     // - Generate attestation proof
-//     // - Store session in TEE memory
-    
-//     // For now, just generate a UUID to simulate session creation
-//     let session_id = Uuid::new_v4();
-    
-//     // Simulate TEE processing time
-//     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    
-//     info!("[TEE PLACEHOLDER] Session {} created in TEE", session_id);
-//     warn!("[TEE PLACEHOLDER] This is a mock implementation - real TEE integration needed");
-    
-//     Ok(session_id)
-// }
+/// Response from the enclave for session termination
+#[derive(Debug, Serialize, Deserialize)]
+struct EnclaveTerminateResponse {
+    session_id: String,
+    status: String,
+}
 
-// /// Get session data from TEE
-// /// 
-// /// Placeholder for retrieving session data from TEE.
-// pub async fn get_session(_session_id: &Uuid) -> Result<Option<TEESession>> {
-//     // TODO: Real TEE implementation
-//     // - Query TEE for session
-//     // - Verify attestation
-//     // - Decrypt and return session data
-    
-//     warn!("[TEE PLACEHOLDER] get_session not implemented");
-//     Ok(None)
-// }
+/// Result of creating a session in the TEE
+#[derive(Debug, Clone)]
+pub struct TEESessionResult {
+    pub session_id: String,
+    pub viewer_id: String,
+    pub stream_id: String,
+}
 
-// /// Update session in TEE
-// /// 
-// /// Placeholder for updating session data in TEE.
-// pub async fn update_session(_session_id: &Uuid, _updates: &str) -> Result<()> {
-//     // TODO: Real TEE implementation
-//     // - Update encrypted session object
-//     // - Generate new attestation proof
-    
-//     warn!("[TEE PLACEHOLDER] update_session not implemented");
-//     Ok(())
-// }
+/// Result of terminating a session in the TEE
+#[derive(Debug, Clone)]
+pub struct TEETerminateResult {
+    pub session_id: String,
+}
 
+/// Create a new session in the TEE
+/// The enclave writes directly to the database
+pub async fn create_session(viewer_id: &str, stream_id: &str) -> Result<TEESessionResult> {
+    info!(
+        "Creating session in TEE for viewer {} on stream {}",
+        viewer_id, stream_id
+    );
 
+    // Get enclave URL from environment, default to localhost
+    let enclave_url =
+        env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
+    // Create request payload
+    let request = serde_json::json!({
+        "viewer_id": viewer_id,
+        "stream_id": stream_id,
+    });
 
+    // Make HTTP request to enclave
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&format!("{}/create_session", enclave_url))
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Failed to connect to enclave at {}: {}", enclave_url, e);
+            anyhow::anyhow!("TEE connection error: {}", e)
+        })?;
 
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        error!("Enclave returned error status {}: {}", status, error_text);
+        return Err(anyhow::anyhow!(
+            "TEE error: HTTP {} - {}",
+            status,
+            error_text
+        ));
+    }
+
+    // Parse response
+    let enclave_response: EnclaveSessionResponse = response.json().await.map_err(|e| {
+        error!("Failed to parse enclave response: {}", e);
+        anyhow::anyhow!("TEE response parsing error: {}", e)
+    })?;
+
+    info!(
+        "Session {} created successfully in TEE",
+        enclave_response.session_id
+    );
+
+    Ok(TEESessionResult {
+        session_id: enclave_response.session_id,
+        viewer_id: enclave_response.viewer_id,
+        stream_id: enclave_response.stream_id,
+    })
+}
+
+/// Terminate a session in the TEE
+/// The enclave updates the database directly
+pub async fn terminate_session(session_id: &str) -> Result<TEETerminateResult> {
+    info!("Terminating session {} in TEE", session_id);
+
+    // Get enclave URL from environment, default to localhost
+    let enclave_url =
+        env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+
+    // Create request payload
+    let request = serde_json::json!({
+        "session_id": session_id,
+    });
+
+    // Make HTTP request to enclave
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&format!("{}/terminate_session", enclave_url))
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Failed to connect to enclave at {}: {}", enclave_url, e);
+            anyhow::anyhow!("TEE connection error: {}", e)
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        error!("Enclave returned error status {}: {}", status, error_text);
+        return Err(anyhow::anyhow!(
+            "TEE error: HTTP {} - {}",
+            status,
+            error_text
+        ));
+    }
+
+    // Parse response
+    let enclave_response: EnclaveTerminateResponse = response.json().await.map_err(|e| {
+        error!("Failed to parse enclave response: {}", e);
+        anyhow::anyhow!("TEE response parsing error: {}", e)
+    })?;
+
+    info!(
+        "Session {} terminated successfully in TEE",
+        enclave_response.session_id
+    );
+
+    Ok(TEETerminateResult {
+        session_id: enclave_response.session_id,
+    })
+}

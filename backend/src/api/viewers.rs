@@ -1,10 +1,8 @@
-use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
-use tracing::{error, info};
+use axum::{http::StatusCode, response::Json, routing::post, Router};
+use tracing::info;
 
 use crate::database::DbPool;
 use crate::models::viewer::*;
-use crate::sui;
-use crate::tee;
 
 pub fn create_router() -> Router<DbPool> {
     Router::new()

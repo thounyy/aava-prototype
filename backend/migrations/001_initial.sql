@@ -15,8 +15,3 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_viewer_id ON sessions(viewer_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_stream_id ON sessions(stream_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
-
-
-
-
-

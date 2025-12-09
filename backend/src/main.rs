@@ -19,8 +19,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Create application router
     let app = Router::new()
-        .merge(api::viewer::create_router())
-        .merge(api::session::create_router())
+        .merge(api::viewers::create_router())
+        .merge(api::sessions::create_router())
         .with_state(db);
 
     // Start server
