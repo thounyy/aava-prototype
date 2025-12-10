@@ -26,10 +26,14 @@ use sqlx::PgPool;
 pub struct AppState {
     /// Ephemeral keypair on boot
     pub eph_kp: Ed25519KeyPair,
-    /// API key (not used for session-engine, kept for compatibility)
-    pub api_key: String,
     /// Database connection pool
     pub db: PgPool,
+}
+
+/// Enclave errors enum.
+#[derive(Debug)]
+pub enum EnclaveError {
+    GenericError(String),
 }
 
 /// Implement IntoResponse for EnclaveError.
@@ -43,12 +47,6 @@ impl IntoResponse for EnclaveError {
         }));
         (status, body).into_response()
     }
-}
-
-/// Enclave errors enum.
-#[derive(Debug)]
-pub enum EnclaveError {
-    GenericError(String),
 }
 
 impl fmt::Display for EnclaveError {

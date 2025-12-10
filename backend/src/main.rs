@@ -2,7 +2,6 @@ mod api;
 mod database;
 mod models;
 mod sui;
-mod tee;
 
 use axum::Router;
 use std::net::SocketAddr;

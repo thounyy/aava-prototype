@@ -4,7 +4,7 @@
 use anyhow::Result;
 use axum::{routing::get, routing::post, Router};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
-use nautilus_server::app::{create_session, process_data, terminate_session};
+use nautilus_server::app::{close_session, open_session};
 use nautilus_server::common::{get_attestation, health_check};
 use nautilus_server::AppState;
 use sqlx::postgres::PgPoolOptions;
@@ -16,21 +16,18 @@ use tracing::info;
 async fn main() -> Result<()> {
     let eph_kp = Ed25519KeyPair::generate(&mut rand::thread_rng());
 
-    // API key not needed for session-engine, but kept for AppState compatibility
-    let api_key = std::env::var("API_KEY").unwrap_or_default();
-
     // Initialize database connection
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost/aava".to_string());
-    
+
     let db = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)
         .await?;
-    
+
     info!("Database connection established");
 
-    let state = Arc::new(AppState { eph_kp, api_key, db });
+    let state = Arc::new(AppState { eph_kp, db });
 
     // Define your own restricted CORS policy here if needed.
     let cors = CorsLayer::new().allow_methods(Any).allow_headers(Any);
@@ -38,10 +35,9 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .route("/", get(ping))
         .route("/get_attestation", get(get_attestation))
-        .route("/process_data", post(process_data))
-        .route("/create_session", post(create_session))
-        .route("/terminate_session", post(terminate_session))
         .route("/health_check", get(health_check))
+        .route("/open_session", post(open_session))
+        .route("/close_session", post(close_session))
         .with_state(state)
         .layer(cors);
 

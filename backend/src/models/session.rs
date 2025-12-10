@@ -27,20 +27,20 @@ pub struct OpenSessionResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminateSessionRequest {
+pub struct CloseSessionRequest {
     pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerminateSessionResponse {
+pub struct CloseSessionResponse {
     pub session_id: String,
     pub status: SessionStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionStatus {
-    Created,
+    Open,
     Active,
-    Completed,
+    Closed,
     Error(String),
 }

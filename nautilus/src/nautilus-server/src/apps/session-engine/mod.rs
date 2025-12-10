@@ -18,14 +18,14 @@ use uuid::Uuid;
 
 /// Request payload for creating a session
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SessionRequest {
+pub struct OpenSessionRequest {
     pub viewer_id: String,
     pub stream_id: String,
 }
 
 /// Response for session creation
 #[derive(Debug, Serialize, Deserialize)]
-pub struct SessionResponse {
+pub struct OpenSessionResponse {
     pub session_id: String,
     pub viewer_id: String,
     pub stream_id: String,
@@ -34,23 +34,23 @@ pub struct SessionResponse {
 
 /// Request payload for terminating a session
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TerminateSessionRequest {
+pub struct CloseSessionRequest {
     pub session_id: String,
 }
 
 /// Response for session termination
 #[derive(Debug, Serialize, Deserialize)]
-pub struct TerminateSessionResponse {
+pub struct CloseSessionResponse {
     pub session_id: String,
     pub status: String,
 }
 
 /// Create a new session
 /// Generates session ID and writes directly to database
-pub async fn create_session(
+pub async fn open_session(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<SessionRequest>,
-) -> Result<Json<SessionResponse>, EnclaveError> {
+    Json(request): Json<OpenSessionRequest>,
+) -> Result<Json<OpenSessionResponse>, EnclaveError> {
     info!(
         "Creating session for viewer {} on stream {}",
         request.viewer_id, request.stream_id
@@ -81,7 +81,7 @@ pub async fn create_session(
 
             info!("Session {} created successfully in database", db_session_id);
 
-            Ok(Json(SessionResponse {
+            Ok(Json(OpenSessionResponse {
                 session_id: db_session_id.to_string(),
                 viewer_id: db_viewer_id,
                 stream_id: db_stream_id,
@@ -100,15 +100,15 @@ pub async fn create_session(
 
 /// Terminate a session
 /// Updates session status to 'completed' in database
-pub async fn terminate_session(
+pub async fn close_session(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<TerminateSessionRequest>,
-) -> Result<Json<TerminateSessionResponse>, EnclaveError> {
+    Json(request): Json<CloseSessionRequest>,
+) -> Result<Json<CloseSessionResponse>, EnclaveError> {
     let session_id = Uuid::parse_str(&request.session_id).map_err(|e| {
         EnclaveError::GenericError(format!("Invalid session ID: {}", e))
     })?;
 
-    info!("Terminating session {}", session_id);
+    info!("Closing session {}", session_id);
 
     // Update session status to completed
     let result = sqlx::query(
@@ -126,9 +126,9 @@ pub async fn terminate_session(
             let db_session_id: Uuid = row.get("id");
             let db_status: String = row.get("status");
 
-            info!("Session {} terminated successfully", db_session_id);
+            info!("Session {} closed successfully", db_session_id);
 
-            Ok(Json(TerminateSessionResponse {
+            Ok(Json(CloseSessionResponse {
                 session_id: db_session_id.to_string(),
                 status: db_status,
             }))
@@ -140,28 +140,18 @@ pub async fn terminate_session(
             )))
         }
         Err(e) => {
-            error!("Database error terminating session: {}", e);
+            error!("Database error closing session: {}", e);
             Err(EnclaveError::GenericError(format!(
-                "Failed to terminate session: {}",
+                "Failed to close session: {}",
                 e
             )))
         }
     }
 }
 
-// Keep process_data for backward compatibility, but it now just calls create_session
-use crate::common::ProcessDataRequest;
-pub async fn process_data(
-    State(state): State<Arc<AppState>>,
-    Json(request): Json<ProcessDataRequest<SessionRequest>>,
-) -> Result<Json<SessionResponse>, EnclaveError> {
-    create_session(State(state), Json(request.payload)).await
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_session_id_generation() {
