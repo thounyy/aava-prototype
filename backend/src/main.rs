@@ -23,7 +23,7 @@ async fn main() -> anyhow::Result<()> {
         .with_state(db);
 
     // Start server
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     info!("Server starting on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
