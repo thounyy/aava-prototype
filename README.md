@@ -14,7 +14,7 @@ Aava is a programmable video layer that leverages AI-powered compression and dec
 ┌─────────────────┐
 │   Backend API   │  (Port 8080)
 │   (Proxy)       │
-└──────┬───────────┘
+└──────┬──────────┘
        │
        │ HTTP Request
        │ ENCLAVE_URL

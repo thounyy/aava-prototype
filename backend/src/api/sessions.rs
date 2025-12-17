@@ -76,13 +76,16 @@ async fn open_session(
     }
 
     // Parse response
-    let enclave_response: EnclaveOpenSessionResponse = response.json().await.map_err(|e| {
-        error!("Failed to parse enclave response: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE response parsing error: {}", e),
-        )
-    })?;
+    let enclave_response: EnclaveOpenSessionResponse = response
+        .json()
+        .await
+        .map_err(|e| {
+            error!("Failed to parse enclave response: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("TEE response parsing error: {}", e),
+            )
+        })?;
 
     info!(
         "Session {} opened successfully",

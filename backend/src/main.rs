@@ -20,6 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .merge(api::viewers::create_router())
         .merge(api::sessions::create_router())
+        .merge(api::streams::create_router())
         .with_state(db);
 
     // Start server
