@@ -4,7 +4,7 @@
 use anyhow::Result;
 use axum::{routing::get, routing::post, Router};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
-use nautilus_server::app::{close_session, open_session};
+use nautilus_server::app::{close_session, end_stream, open_session};
 use nautilus_server::common::{get_attestation, health_check};
 use nautilus_server::AppState;
 use sqlx::postgres::PgPoolOptions;
@@ -38,6 +38,7 @@ async fn main() -> Result<()> {
         .route("/health_check", get(health_check))
         .route("/open_session", post(open_session))
         .route("/close_session", post(close_session))
+        .route("/end_stream", post(end_stream))
         .with_state(state)
         .layer(cors);
 

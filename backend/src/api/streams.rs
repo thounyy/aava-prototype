@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
 use crate::database::DbPool;
-use crate::models::session::Session;
 
 pub fn create_router() -> Router<DbPool> {
     Router::new()
@@ -35,6 +34,42 @@ pub struct StreamEndResponse {
     pub status: String,
 }
 
+// Enclave response types for deserializing the signed session data
+#[derive(Debug, Deserialize)]
+struct EnclaveEndStreamResponse {
+    response: EnclaveIntentMessage,
+    signature: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct EnclaveIntentMessage {
+    #[allow(dead_code)]
+    intent: u8,
+    #[allow(dead_code)]
+    timestamp_ms: u64,
+    data: EnclaveStreamData,
+}
+
+#[derive(Debug, Deserialize)]
+struct EnclaveStreamData {
+    #[allow(dead_code)]
+    stream_id: String,
+    #[allow(dead_code)]
+    sessions: Vec<EnclaveSessionData>,
+    sessions_count: u64,
+    data_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct EnclaveSessionData {
+    session_id: String,
+    viewer_id: String,
+    stream_id: String,
+    status: String,
+    created_at: String,
+}
+
 /// Start a stream
 ///
 /// Placeholder for Sui blockchain call to start a stream.
@@ -44,7 +79,7 @@ pub struct StreamEndResponse {
 /// - Emit events for stream start
 async fn stream_start(
     State(_db): State<DbPool>,
-    Json(request): Json<StreamStartRequest>,
+    Json(_request): Json<StreamStartRequest>,
 ) -> Result<Json<StreamStartResponse>, (StatusCode, String)> {
     info!("Starting stream");
 
@@ -62,47 +97,157 @@ async fn stream_start(
     }))
 }
 
-/// End a stream
+/// Fetch attested session data from the enclave
 ///
-/// This endpoint:
-/// 1. Batches all sessions with this stream_id
-/// 2. Publishes session data to Walrus (decentralized storage)
-/// 3. Generates ZK proof via Nautilus
-/// 4. Publishes proof to Sui blockchain
-async fn stream_end(
-    State(db): State<DbPool>,
-    Json(request): Json<StreamEndRequest>,
-) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
-    info!(
-        "Ending stream {} - batching sessions and generating proof",
-        request.stream_id
-    );
+/// Returns (sessions_count, data_hash, signature)
+async fn fetch_attested_sessions_from_enclave(
+    stream_id: &str,
+) -> Result<(u64, String, String), (StatusCode, String)> {
+    let enclave_url =
+        std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-    // Step 1: Query all sessions for this stream
-    let sessions = sqlx::query_as::<_, Session>(
-        "SELECT id, viewer_id, stream_id, status, created_at
-         FROM sessions
-         WHERE stream_id = $1 AND status IN ('active', 'open', 'created')
-         ORDER BY created_at",
-    )
-    .bind(&request.stream_id)
-    .fetch_all(&db)
-    .await
-    .map_err(|e| {
-        error!("Database error querying sessions: {}", e);
+    let request_body = serde_json::json!({
+        "stream_id": stream_id,
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&format!("{}/end_stream", enclave_url))
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Failed to connect to enclave at {}: {}", enclave_url, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("TEE connection error: {}", e),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        error!("Enclave returned error status {}: {}", status, error_text);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("TEE error: HTTP {} - {}", status, error_text),
+        ));
+    }
+
+    let enclave_response: EnclaveEndStreamResponse = response.json().await.map_err(|e| {
+        error!("Failed to parse enclave response: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to query sessions: {}", e),
+            format!("TEE response parsing error: {}", e),
         )
     })?;
 
-    let sessions_count = sessions.len() as u64;
+    let sessions_count = enclave_response.response.data.sessions_count;
+    let data_hash = enclave_response.response.data.data_hash;
+    let signature = enclave_response.signature;
+
     info!(
-        "Found {} sessions for stream {}",
-        sessions_count, request.stream_id
+        "Received {} sessions from enclave with attestation (hash: {}, signature: {})",
+        sessions_count,
+        data_hash,
+        &signature[..16] // Show first 16 chars of signature
     );
 
-    if sessions.is_empty() {
+    Ok((sessions_count, data_hash, signature))
+}
+
+/// Upload session data to Walrus (placeholder)
+async fn upload_to_walrus(
+    stream_id: &str,
+    sessions_count: u64,
+    data_hash: &str,
+) -> Result<Option<String>, (StatusCode, String)> {
+    info!(
+        "Session data ready for Walrus upload: {} sessions, hash: {}",
+        sessions_count, data_hash
+    );
+
+    // TODO: Real Walrus implementation
+    // - Upload session data + attestation to Walrus
+    // - Get content hash and URL
+    // Example:
+    // let walrus_result = walrus::upload(&session_data, &signature).await?;
+    // let walrus_url = walrus_result.url;
+
+    warn!("[PLACEHOLDER] Publishing to Walrus - not implemented");
+    Ok(Some(format!(
+        "walrus://placeholder/{}/sessions.json",
+        stream_id
+    )))
+}
+
+/// Generate ZK proof via Nautilus (placeholder)
+async fn generate_nautilus_proof(
+    stream_id: &str,
+    _sessions_count: u64,
+    _data_hash: &str,
+) -> Result<Option<String>, (StatusCode, String)> {
+    // TODO: Real Nautilus implementation
+    // - Send attested session data to Nautilus server
+    // - Generate ZK proof of all sessions
+    // - Get proof hash
+    // Example:
+    // let nautilus_url = env::var("NAUTILUS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    // let proof = nautilus::generate_batch_proof(&nautilus_url, &session_data, &signature).await?;
+    // let proof_hash = proof.hash;
+
+    warn!("[PLACEHOLDER] Generating Nautilus proof - not implemented");
+    Ok(Some(format!("proof_hash_placeholder_{}", stream_id)))
+}
+
+/// Publish proof to Sui blockchain (placeholder)
+async fn publish_proof_to_sui(
+    _stream_id: &str,
+    _proof_hash: &str,
+    _walrus_url: &Option<String>,
+    _data_hash: &str,
+) -> Result<(), (StatusCode, String)> {
+    // TODO: Real Sui implementation
+    // - Submit proof transaction to Sui
+    // - Include enclave signature and data hash for verification
+    // - Wait for transaction confirmation
+    // Example:
+    // let tx_result = sui::publish_stream_proof(
+    //     stream_id,
+    //     proof_hash,
+    //     walrus_url,
+    //     data_hash,
+    //     &signature
+    // ).await?;
+
+    warn!("[PLACEHOLDER] Publishing proof to Sui - not implemented");
+    Ok(())
+}
+
+/// End a stream
+///
+/// This endpoint:
+/// 1. Calls enclave to query database and generate cryptographic attestation
+/// 2. Publishes attested session data to Walrus (decentralized storage)
+/// 3. Generates ZK proof via Nautilus
+/// 4. Publishes proof to Sui blockchain
+async fn stream_end(
+    State(_db): State<DbPool>,
+    Json(request): Json<StreamEndRequest>,
+) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
+    info!(
+        "Ending stream {} - calling enclave to batch sessions and generate attestation",
+        request.stream_id
+    );
+
+    // Step 1: Fetch attested sessions from enclave
+    let (sessions_count, data_hash, _signature) =
+        fetch_attested_sessions_from_enclave(&request.stream_id).await?;
+
+    if sessions_count == 0 {
         warn!("No active sessions found for stream {}", request.stream_id);
         return Ok(Json(StreamEndResponse {
             stream_id: request.stream_id,
@@ -113,77 +258,25 @@ async fn stream_end(
         }));
     }
 
-    // Step 2: Prepare session data for batch processing
-    let session_data = sessions
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "session_id": s.id.to_string(),
-                "viewer_id": s.viewer_id,
-                "stream_id": s.stream_id,
-                "status": s.status,
-                "created_at": s.created_at.to_rfc3339(),
-            })
-        })
-        .collect::<Vec<_>>();
+    // Step 2: Upload to Walrus
+    let walrus_url = upload_to_walrus(&request.stream_id, sessions_count, &data_hash).await?;
 
-    // Step 3: Publish to Walrus (placeholder)
-    // TODO: Real Walrus implementation
-    // - Upload session data to Walrus
-    // - Get content hash and URL
-    // Example:
-    // let walrus_result = walrus::upload(&session_data).await?;
-    // let walrus_url = walrus_result.url;
+    // Step 3: Generate Nautilus proof
+    let proof_hash =
+        generate_nautilus_proof(&request.stream_id, sessions_count, &data_hash).await?;
 
-    warn!("[PLACEHOLDER] Publishing to Walrus - not implemented");
-    let walrus_url = Some(format!(
-        "walrus://placeholder/{}/sessions.json",
-        request.stream_id
-    ));
-
-    // Step 4: Generate ZK proof via Nautilus (placeholder)
-    // TODO: Real Nautilus implementation
-    // - Send session data to Nautilus server
-    // - Generate ZK proof of all sessions
-    // - Get proof hash
-    // Example:
-    // let nautilus_url = env::var("NAUTILUS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
-    // let proof = nautilus::generate_batch_proof(&nautilus_url, &session_data).await?;
-    // let proof_hash = proof.hash;
-
-    warn!("[PLACEHOLDER] Generating Nautilus proof - not implemented");
-    let proof_hash = Some(format!("proof_hash_placeholder_{}", request.stream_id));
-
-    // Step 5: Publish proof to Sui blockchain (placeholder)
-    // TODO: Real Sui implementation
-    // - Submit proof transaction to Sui
-    // - Wait for transaction confirmation
-    // Example:
-    // let tx_result = sui::publish_stream_proof(&request.stream_id, &proof_hash, &walrus_url).await?;
-
-    warn!("[PLACEHOLDER] Publishing proof to Sui - not implemented");
-
-    // Step 6: Update all sessions to 'completed' status
-    let updated = sqlx::query(
-        "UPDATE sessions 
-         SET status = 'completed', updated_at = NOW()
-         WHERE stream_id = $1 AND status IN ('active', 'open', 'created')",
+    // Step 4: Publish proof to Sui
+    publish_proof_to_sui(
+        &request.stream_id,
+        proof_hash.as_ref().unwrap_or(&String::new()),
+        &walrus_url,
+        &data_hash,
     )
-    .bind(&request.stream_id)
-    .execute(&db)
-    .await
-    .map_err(|e| {
-        error!("Database error updating sessions: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to update sessions: {}", e),
-        )
-    })?;
+    .await?;
 
     info!(
-        "Stream {} ended: {} sessions processed, proof published",
-        request.stream_id,
-        updated.rows_affected()
+        "Stream {} ended: {} sessions processed, attested by enclave, proof published",
+        request.stream_id, sessions_count
     );
 
     Ok(Json(StreamEndResponse {
