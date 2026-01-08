@@ -189,10 +189,10 @@ psql -h localhost -U postgres -d aava -c "SELECT COUNT(*) FROM sessions;"
 
 ## Next Steps
 
-- [ ] Complete session lifecycle with batch proof generation
+- [x] Complete session lifecycle with batch proof generation
+- [ ] Integrate Sui blockchain for verifying hash with Nautilus
+- [ ] Add Walrus integration for dataset publishing
+- [ ] Deploy to AWS Nitro Enclaves and EC2 for testing
 - [ ] Implement event listener and action API
 - [ ] Add session event recording during stream
-- [ ] Integrate Sui blockchain for permission checking
-- [ ] Deploy to AWS Nitro Enclaves
-- [ ] Add Walrus integration for dataset publishing
 

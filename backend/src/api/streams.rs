@@ -30,7 +30,6 @@ pub struct StreamEndResponse {
     pub stream_id: String,
     pub sessions_count: u64,
     pub walrus_url: Option<String>,
-    pub proof_hash: Option<String>,
     pub status: String,
 }
 
@@ -100,7 +99,7 @@ async fn stream_start(
 /// Fetch attested session data from the enclave
 ///
 /// Returns (sessions_count, data_hash, signature)
-async fn fetch_attested_sessions_from_enclave(
+async fn fetch_signed_sessions_from_enclave(
     stream_id: &str,
 ) -> Result<(u64, String, String), (StatusCode, String)> {
     let enclave_url =
@@ -160,7 +159,7 @@ async fn fetch_attested_sessions_from_enclave(
 }
 
 /// Upload session data to Walrus (placeholder)
-async fn upload_to_walrus(
+async fn upload_dataset_to_walrus(
     stream_id: &str,
     sessions_count: u64,
     data_hash: &str,
@@ -184,31 +183,12 @@ async fn upload_to_walrus(
     )))
 }
 
-/// Generate ZK proof via Nautilus (placeholder)
-async fn generate_nautilus_proof(
-    stream_id: &str,
-    _sessions_count: u64,
-    _data_hash: &str,
-) -> Result<Option<String>, (StatusCode, String)> {
-    // TODO: Real Nautilus implementation
-    // - Send attested session data to Nautilus server
-    // - Generate ZK proof of all sessions
-    // - Get proof hash
-    // Example:
-    // let nautilus_url = env::var("NAUTILUS_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
-    // let proof = nautilus::generate_batch_proof(&nautilus_url, &session_data, &signature).await?;
-    // let proof_hash = proof.hash;
-
-    warn!("[PLACEHOLDER] Generating Nautilus proof - not implemented");
-    Ok(Some(format!("proof_hash_placeholder_{}", stream_id)))
-}
-
 /// Publish proof to Sui blockchain (placeholder)
-async fn publish_proof_to_sui(
+async fn publish_hash_to_sui(
     _stream_id: &str,
-    _proof_hash: &str,
     _walrus_url: &Option<String>,
     _data_hash: &str,
+    _signature: &str,
 ) -> Result<(), (StatusCode, String)> {
     // TODO: Real Sui implementation
     // - Submit proof transaction to Sui
@@ -232,8 +212,7 @@ async fn publish_proof_to_sui(
 /// This endpoint:
 /// 1. Calls enclave to query database and generate cryptographic attestation
 /// 2. Publishes attested session data to Walrus (decentralized storage)
-/// 3. Generates ZK proof via Nautilus
-/// 4. Publishes proof to Sui blockchain
+/// 3. Publishes hash to Sui blockchain
 async fn stream_end(
     State(_db): State<DbPool>,
     Json(request): Json<StreamEndRequest>,
@@ -244,8 +223,8 @@ async fn stream_end(
     );
 
     // Step 1: Fetch attested sessions from enclave
-    let (sessions_count, data_hash, _signature) =
-        fetch_attested_sessions_from_enclave(&request.stream_id).await?;
+    let (sessions_count, data_hash, signature) =
+        fetch_signed_sessions_from_enclave(&request.stream_id).await?;
 
     if sessions_count == 0 {
         warn!("No active sessions found for stream {}", request.stream_id);
@@ -253,24 +232,19 @@ async fn stream_end(
             stream_id: request.stream_id,
             sessions_count: 0,
             walrus_url: None,
-            proof_hash: None,
             status: "completed".to_string(),
         }));
     }
 
     // Step 2: Upload to Walrus
-    let walrus_url = upload_to_walrus(&request.stream_id, sessions_count, &data_hash).await?;
+    let walrus_url = upload_dataset_to_walrus(&request.stream_id, sessions_count, &data_hash).await?;
 
-    // Step 3: Generate Nautilus proof
-    let proof_hash =
-        generate_nautilus_proof(&request.stream_id, sessions_count, &data_hash).await?;
-
-    // Step 4: Publish proof to Sui
-    publish_proof_to_sui(
+    // Step 3: Publish hash to Sui
+    publish_hash_to_sui(
         &request.stream_id,
-        proof_hash.as_ref().unwrap_or(&String::new()),
         &walrus_url,
         &data_hash,
+        &signature,
     )
     .await?;
 
@@ -283,7 +257,6 @@ async fn stream_end(
         stream_id: request.stream_id,
         sessions_count,
         walrus_url,
-        proof_hash,
         status: "completed".to_string(),
     }))
 }

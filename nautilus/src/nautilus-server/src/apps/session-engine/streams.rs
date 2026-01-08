@@ -6,6 +6,7 @@ use crate::EnclaveError;
 use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::sync::Arc;
 use tracing::{error, info};
@@ -60,9 +61,9 @@ pub async fn end_stream(
     // Query all active sessions for this stream from database
     let result = sqlx::query(
         "SELECT id, viewer_id, stream_id, status, created_at
-         FROM sessions
-         WHERE stream_id = $1 AND status IN ('active', 'open', 'created')
-         ORDER BY created_at",
+        FROM sessions
+        WHERE stream_id = $1 AND status IN ('active', 'open', 'created')
+        ORDER BY created_at",
     )
     .bind(&request.stream_id)
     .fetch_all(&state.db)
@@ -103,7 +104,6 @@ pub async fn end_stream(
         .collect();
 
     // Calculate hash of the session data for verification
-    use sha2::{Digest, Sha256};
     let data_json = serde_json::to_string(&sessions)
         .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize sessions: {}", e)))?;
     let mut hasher = Sha256::new();
