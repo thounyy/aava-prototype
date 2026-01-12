@@ -24,47 +24,49 @@ Aava is a programmable video layer that leverages AI-powered compression and dec
 │  Enclave (TEE)  │
 └──────┬──────────┘
        │
-       │ Direct Write
+       │ Authenticated Write
+       │ (Password Protected)
        ▼
 ┌─────────────────┐
-│   PostgreSQL    │
-│   Database      │
+│     Redis       │
+│   (Sessions)    │
+│  localhost:6379 │
+│  Auth Required  │
 └─────────────────┘
 ```
 
 ## Quick Start
 
-### 1. Setup PostgreSQL
+### 1. Setup Redis
 
 ```bash
-# Install PostgreSQL (Fedora/RHEL)
-sudo dnf install postgresql postgresql-server
+# Install Redis (Fedora/RHEL)
+sudo dnf install redis
 
-# Initialize database (first time only)
-sudo postgresql-setup --initdb
+# Configure Redis security
+sudo nano /etc/redis/redis.conf
 
-# Start PostgreSQL
-sudo systemctl start postgresql
-sudo systemctl enable postgresql
+# Set the following:
+# 1. Bind to localhost only (for security)
+bind 127.0.0.1
 
-# Configure authentication for TCP/IP connections
-sudo nano /var/lib/pgsql/data/pg_hba.conf
+# 2. Enable protected mode
+protected-mode yes
 
-# Change these lines:
-# host    all    all    127.0.0.1/32    ident
-# host    all    all    ::1/128         ident
-# To:
-# host    all    all    127.0.0.1/32    md5
-# host    all    all    ::1/128         md5
+# 3. Set a strong password (REQUIRED for production)
+# Generate a secure password:
+openssl rand -base64 32
 
-# Set password for postgres user
-sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+# Add to redis.conf:
+requirepass your-generated-password-here
 
-# Reload PostgreSQL
-sudo systemctl reload postgresql
+# Save and exit, then restart Redis
+sudo systemctl restart redis
+sudo systemctl enable redis
 
-# Create database
-sudo -u postgres psql -c "CREATE DATABASE aava;"
+# Test Redis connection
+redis-cli -a your-generated-password-here ping
+# Should return: PONG
 ```
 
 ### 2. Run the Enclave (Terminal 1)
@@ -72,17 +74,28 @@ sudo -u postgres psql -c "CREATE DATABASE aava;"
 ```bash
 cd nautilus/src/nautilus-server
 
-# Set database connection
-export DATABASE_URL="postgresql://postgres:postgres@localhost/aava"
+# Set Redis connection
+# Option 1: Password in URL
+export REDIS_URL="redis://:your-password@localhost:6379"
+
+# Option 2: Password as separate env var (more secure, doesn't show in process list)
+export REDIS_URL="redis://localhost:6379"
+export REDIS_PASSWORD="your-password"
 
 # Run the enclave
 RUST_LOG=info cargo run --bin nautilus-server
 ```
 
+**Security Note**: The enclave is the ONLY process that should have access to Redis. 
+- Redis is bound to localhost only
+- Password authentication is required
+- Only the enclave writes/reads session data
+- Cryptographic attestation ensures data integrity
+
 The enclave will:
-- Connect to PostgreSQL
+- Connect to Redis
 - Listen on `http://localhost:3000`
-- Handle `/open_session` and `/close_session` endpoints
+- Handle `/open_session`, `/close_session`, `/end_stream`, and `/cleanup_sessions` endpoints
 
 ### 3. Run the Backend (Terminal 2)
 
@@ -92,8 +105,8 @@ cd backend
 # Set enclave URL (points to enclave)
 export ENCLAVE_URL="http://localhost:3000"
 
-# Set database URL (for migrations only)
-export DATABASE_URL="postgresql://postgres:postgres@localhost/aava"
+# Note: Backend no longer needs database connection
+# Sessions are stored in Redis by the enclave
 
 # Run the backend
 cargo run
@@ -161,15 +174,74 @@ curl -X POST http://localhost:8080/api/sessions/open \
   }'
 ```
 
-### Verify Database
+### Verify Redis Sessions
 
 ```bash
-# Check sessions in database
-psql -h localhost -U postgres -d aava -c "SELECT * FROM sessions;"
+# Connect to Redis (with password)
+redis-cli -a your-password
 
-# Count sessions
-psql -h localhost -U postgres -d aava -c "SELECT COUNT(*) FROM sessions;"
+# Check all session keys
+KEYS session:*
+
+# Check stream session sets
+KEYS stream:*:sessions
+
+# Get session count for a stream
+SMEMBERS stream:your-stream-id:sessions
+
+# Get a specific session
+GET session:your-session-id
 ```
+
+## Security
+
+### Data Integrity Guarantees
+
+The architecture ensures data integrity through multiple layers:
+
+1. **Redis Access Control**
+   - Redis is bound to `localhost` only (no external access)
+   - Password authentication required (`requirepass`)
+   - Only the enclave has the password (via `REDIS_PASSWORD` env var)
+   - Other processes on the machine cannot access Redis without the password
+
+2. **Enclave Isolation**
+   - The enclave (TEE) is the **only** process that writes to Redis
+   - All session operations go through the enclave
+   - The backend never directly accesses Redis
+
+3. **Cryptographic Attestation**
+   - When ending a stream, the enclave:
+     - Reads all sessions from Redis
+     - Calculates SHA-256 hash of the session data
+     - Signs the data with the enclave's private key
+   - The hash proves data integrity at the time of attestation
+   - The signature proves the enclave saw the correct data
+   - Any tampering with Redis data will result in a mismatched hash
+
+4. **On-Chain Verification**
+   - The hash and signature are published to Sui blockchain
+   - Anyone can verify the data integrity by:
+     - Downloading the dataset from Walrus
+     - Calculating the hash
+     - Comparing with the on-chain hash
+     - Verifying the enclave signature
+
+### Security Best Practices
+
+**Production Deployment:**
+- ✅ Use strong Redis password (32+ characters, random)
+- ✅ Store `REDIS_PASSWORD` in secure secret management (not in code)
+- ✅ Run Redis in isolated network/VPC
+- ✅ Enable Redis TLS for encrypted connections
+- ✅ Use Redis ACLs to restrict commands
+- ✅ Monitor Redis access logs
+- ✅ Run enclave in TEE (AWS Nitro Enclaves, Intel SGX, etc.)
+
+**Development:**
+- ⚠️ Redis password is still required (prevents accidental access)
+- ⚠️ Use `REDIS_PASSWORD` env var (more secure than URL)
+- ⚠️ Don't commit passwords to git
 
 ## Configuration
 
@@ -177,10 +249,11 @@ psql -h localhost -U postgres -d aava -c "SELECT COUNT(*) FROM sessions;"
 
 **Backend:**
 - `ENCLAVE_URL`: URL of the enclave (default: `http://localhost:3000`)
-- `DATABASE_URL`: Database connection string (for migrations only)
 
 **Enclave:**
-- `DATABASE_URL`: Database connection string (default: `postgresql://postgres:postgres@localhost/aava`)
+- `REDIS_URL`: Redis connection URL (default: `redis://localhost:6379`)
+- `REDIS_PASSWORD`: Redis password (recommended, more secure than URL)
+  - Alternative: Include password in `REDIS_URL` as `redis://:password@localhost:6379`
 
 ### Ports
 

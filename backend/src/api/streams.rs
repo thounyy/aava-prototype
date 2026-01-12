@@ -6,8 +6,8 @@ use crate::database::DbPool;
 
 pub fn create_router() -> Router<DbPool> {
     Router::new()
-        .route("/api/streams/start", post(stream_start))
-        .route("/api/streams/end", post(stream_end))
+        .route("/api/streams/start", post(start_stream))
+        .route("/api/streams/end", post(end_stream))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,7 +76,7 @@ struct EnclaveSessionData {
 /// - Call Sui to mark stream as active
 /// - Update stream object on-chain
 /// - Emit events for stream start
-async fn stream_start(
+async fn start_stream(
     State(_db): State<DbPool>,
     Json(_request): Json<StreamStartRequest>,
 ) -> Result<Json<StreamStartResponse>, (StatusCode, String)> {
@@ -86,8 +86,6 @@ async fn stream_start(
     // - Call Sui Move function to start stream
     // - Update stream object status on-chain
     // - Emit stream_start event
-    // Example:
-    // let tx_result = sui::start_stream(&request.stream_id).await?;
 
     warn!("[PLACEHOLDER] Stream start - Sui call not implemented");
 
@@ -95,6 +93,61 @@ async fn stream_start(
         stream_id: "stream_id".to_string(),
     }))
 }
+
+/// End a stream
+///
+/// This endpoint:
+/// 1. Calls enclave to query Redis and generate cryptographic attestation
+/// 2. Publishes attested session data to Walrus (decentralized storage)
+/// 3. Publishes hash to Sui blockchain
+/// 4. Cleans up sessions from Redis after successful upload
+async fn end_stream(
+    State(_db): State<DbPool>,
+    Json(request): Json<StreamEndRequest>,
+) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
+    info!(
+        "Ending stream {} - calling enclave to batch sessions and generate attestation",
+        request.stream_id
+    );
+
+    // Step 1: Fetch attested sessions from enclave
+    let (sessions_count, data_hash, signature) =
+        fetch_signed_sessions_from_enclave(&request.stream_id).await?;
+
+    if sessions_count == 0 {
+        warn!("No active sessions found for stream {}", request.stream_id);
+        return Ok(Json(StreamEndResponse {
+            stream_id: request.stream_id,
+            sessions_count: 0,
+            walrus_url: None,
+            status: "completed".to_string(),
+        }));
+    }
+
+    // Step 2: Upload to Walrus
+    let walrus_url =
+        upload_dataset_to_walrus(&request.stream_id, sessions_count, &data_hash).await?;
+
+    // Step 3: Publish hash to Sui
+    publish_hash_to_sui(&request.stream_id, &walrus_url, &data_hash, &signature).await?;
+
+    // Step 4: Cleanup stream data from Redis after successful Walrus upload
+    cleanup_stream_from_enclave(&request.stream_id).await?;
+
+    info!(
+        "Stream {} ended: {} sessions processed, attested by enclave, uploaded to Walrus, and cleaned up",
+        request.stream_id, sessions_count
+    );
+
+    Ok(Json(StreamEndResponse {
+        stream_id: request.stream_id,
+        sessions_count,
+        walrus_url,
+        status: "completed".to_string(),
+    }))
+}
+
+// === Helper functions ===
 
 /// Fetch attested session data from the enclave
 ///
@@ -207,56 +260,58 @@ async fn publish_hash_to_sui(
     Ok(())
 }
 
-/// End a stream
-///
-/// This endpoint:
-/// 1. Calls enclave to query database and generate cryptographic attestation
-/// 2. Publishes attested session data to Walrus (decentralized storage)
-/// 3. Publishes hash to Sui blockchain
-async fn stream_end(
-    State(_db): State<DbPool>,
-    Json(request): Json<StreamEndRequest>,
-) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
-    info!(
-        "Ending stream {} - calling enclave to batch sessions and generate attestation",
-        request.stream_id
-    );
+/// Cleanup stream data from Redis after successful Walrus upload
+async fn cleanup_stream_from_enclave(stream_id: &str) -> Result<(), (StatusCode, String)> {
+    let enclave_url =
+        std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-    // Step 1: Fetch attested sessions from enclave
-    let (sessions_count, data_hash, signature) =
-        fetch_signed_sessions_from_enclave(&request.stream_id).await?;
+    let request_body = serde_json::json!({
+        "stream_id": stream_id,
+    });
 
-    if sessions_count == 0 {
-        warn!("No active sessions found for stream {}", request.stream_id);
-        return Ok(Json(StreamEndResponse {
-            stream_id: request.stream_id,
-            sessions_count: 0,
-            walrus_url: None,
-            status: "completed".to_string(),
-        }));
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&format!("{}/cleanup_stream", enclave_url))
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Failed to connect to enclave for cleanup: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("TEE connection error: {}", e),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        error!(
+            "Enclave cleanup returned error status {}: {}",
+            status, error_text
+        );
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("TEE cleanup error: HTTP {} - {}", status, error_text),
+        ));
     }
 
-    // Step 2: Upload to Walrus
-    let walrus_url = upload_dataset_to_walrus(&request.stream_id, sessions_count, &data_hash).await?;
+    let cleanup_response: serde_json::Value = response.json().await.map_err(|e| {
+        error!("Failed to parse cleanup response: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("TEE response parsing error: {}", e),
+        )
+    })?;
 
-    // Step 3: Publish hash to Sui
-    publish_hash_to_sui(
-        &request.stream_id,
-        &walrus_url,
-        &data_hash,
-        &signature,
-    )
-    .await?;
-
+    let deleted_count = cleanup_response["deleted_count"].as_u64().unwrap_or(0);
     info!(
-        "Stream {} ended: {} sessions processed, attested by enclave, proof published",
-        request.stream_id, sessions_count
+        "Cleaned up {} stream data from Redis for stream {}",
+        deleted_count, stream_id
     );
 
-    Ok(Json(StreamEndResponse {
-        stream_id: request.stream_id,
-        sessions_count,
-        walrus_url,
-        status: "completed".to_string(),
-    }))
+    Ok(())
 }

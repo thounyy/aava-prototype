@@ -15,4 +15,7 @@ pub use sessions::{
 };
 
 // Re-export stream types and functions
-pub use streams::{end_stream, EndStreamRequest, EndStreamResponse, SessionData};
+pub use streams::{
+    cleanup_stream, end_stream, CleanupStreamRequest, EndStreamRequest, EndStreamResponse,
+    SessionData,
+};

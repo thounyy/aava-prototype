@@ -5,8 +5,8 @@ use crate::AppState;
 use crate::EnclaveError;
 use axum::extract::State;
 use axum::Json;
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use std::sync::Arc;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -41,7 +41,7 @@ pub struct CloseSessionResponse {
 }
 
 /// Create a new session
-/// Generates session ID and writes directly to database
+/// Generates session ID and writes to Redis
 pub async fn open_session(
     State(state): State<Arc<AppState>>,
     Json(request): Json<OpenSessionRequest>,
@@ -52,93 +52,110 @@ pub async fn open_session(
     );
 
     // Generate unique session ID
-    let session_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4().to_string();
+    let status = "created";
+    let created_at = chrono::Utc::now().to_rfc3339();
 
-    // Write directly to database
-    let result = sqlx::query(
-        "INSERT INTO sessions (id, viewer_id, stream_id, status)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, viewer_id, stream_id, status",
-    )
-    .bind(session_id)
-    .bind(&request.viewer_id)
-    .bind(&request.stream_id)
-    .bind("created")
-    .fetch_one(&state.db)
-    .await;
+    // Create session data as JSON
+    let session_data = serde_json::json!({
+        "session_id": session_id,
+        "viewer_id": request.viewer_id,
+        "stream_id": request.stream_id,
+        "status": status,
+        "created_at": created_at,
+    });
 
-    match result {
-        Ok(row) => {
-            let db_session_id: Uuid = row.get("id");
-            let db_viewer_id: String = row.get("viewer_id");
-            let db_stream_id: String = row.get("stream_id");
-            let db_status: String = row.get("status");
+    let mut redis = state.redis.clone();
 
-            info!("Session {} created successfully in database", db_session_id);
+    // Store session data in Redis
+    // Key: session:{session_id}
+    // Value: JSON string of session data
+    // TTL: 24 hours (86400 seconds) as safety net
+    let session_key = format!("session:{}", session_id);
+    let session_json = serde_json::to_string(&session_data)
+        .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize session: {}", e)))?;
 
-            Ok(Json(OpenSessionResponse {
-                session_id: db_session_id.to_string(),
-                viewer_id: db_viewer_id,
-                stream_id: db_stream_id,
-                status: db_status,
-            }))
-        }
-        Err(e) => {
-            error!("Database error creating session: {}", e);
-            Err(EnclaveError::GenericError(format!(
-                "Failed to create session: {}",
-                e
-            )))
-        }
-    }
+    // Add session to stream's session set
+    let stream_sessions_key = format!("stream:{}:sessions", request.stream_id);
+
+    // Store session and add to stream set atomically
+    // Use MULTI/EXEC for atomicity
+    let mut pipe = redis::pipe();
+    pipe.atomic()
+        .set(&session_key, &session_json)
+        .expire(&session_key, 86400) // 24 hour TTL
+        .sadd(&stream_sessions_key, &session_id)
+        .expire(&stream_sessions_key, 86400); // Also expire the set
+
+    let _: () = pipe.query_async(&mut redis).await.map_err(|e| {
+        error!("Redis error creating session: {}", e);
+        EnclaveError::GenericError(format!("Failed to create session: {}", e))
+    })?;
+
+    info!("Session {} created successfully in Redis", session_id);
+
+    Ok(Json(OpenSessionResponse {
+        session_id: session_id,
+        viewer_id: request.viewer_id,
+        stream_id: request.stream_id,
+        status: status.to_string(),
+    }))
 }
 
 /// Terminate a session
-/// Updates session status to 'completed' in database
+/// Updates session status to 'completed' in Redis
 pub async fn close_session(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CloseSessionRequest>,
 ) -> Result<Json<CloseSessionResponse>, EnclaveError> {
-    let session_id = Uuid::parse_str(&request.session_id)
+    let session_id_str = &request.session_id;
+    let session_id = Uuid::parse_str(session_id_str)
         .map_err(|e| EnclaveError::GenericError(format!("Invalid session ID: {}", e)))?;
 
     info!("Closing session {}", session_id);
 
-    // Update session status to completed
-    let result = sqlx::query(
-        "UPDATE sessions 
-        SET status = 'completed', updated_at = NOW()
-        WHERE id = $1
-        RETURNING id, status",
-    )
-    .bind(session_id)
-    .fetch_optional(&state.db)
-    .await;
+    let mut redis = state.redis.clone();
+    let session_key = format!("session:{}", session_id_str);
 
-    match result {
-        Ok(Some(row)) => {
-            let db_session_id: Uuid = row.get("id");
-            let db_status: String = row.get("status");
+    // Get existing session data
+    let session_json: Option<String> = redis.get(&session_key).await.map_err(|e| {
+        error!("Redis error reading session: {}", e);
+        EnclaveError::GenericError(format!("Failed to read session: {}", e))
+    })?;
 
-            info!("Session {} closed successfully", db_session_id);
-
-            Ok(Json(CloseSessionResponse {
-                session_id: db_session_id.to_string(),
-                status: db_status,
-            }))
+    let session_data: serde_json::Value = match session_json {
+        Some(json) => serde_json::from_str(&json).map_err(|e| {
+            EnclaveError::GenericError(format!("Failed to parse session data: {}", e))
+        })?,
+        None => {
+            return Err(EnclaveError::GenericError(format!(
+                "Session {} not found",
+                session_id
+            )));
         }
-        Ok(None) => Err(EnclaveError::GenericError(format!(
-            "Session {} not found",
-            session_id
-        ))),
-        Err(e) => {
-            error!("Database error closing session: {}", e);
-            Err(EnclaveError::GenericError(format!(
-                "Failed to close session: {}",
-                e
-            )))
-        }
-    }
+    };
+
+    // Update status to completed
+    let mut updated_data = session_data.clone();
+    updated_data["status"] = serde_json::Value::String("completed".to_string());
+    updated_data["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+
+    let updated_json = serde_json::to_string(&updated_data).map_err(|e| {
+        EnclaveError::GenericError(format!("Failed to serialize updated session: {}", e))
+    })?;
+
+    // Update session in Redis
+    let _: () = redis.set(&session_key, &updated_json).await.map_err(|e| {
+        error!("Redis error updating session: {}", e);
+        EnclaveError::GenericError(format!("Failed to close session: {}", e))
+    })?;
+
+    info!("Session {} closed successfully", session_id);
+
+    Ok(Json(CloseSessionResponse {
+        session_id: session_id_str.clone(),
+        status: "completed".to_string(),
+    }))
 }
 
 #[cfg(test)]

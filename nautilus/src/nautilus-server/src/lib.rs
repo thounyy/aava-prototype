@@ -20,14 +20,14 @@ pub mod app {
 
 pub mod common;
 
-use sqlx::PgPool;
+use redis::aio::ConnectionManager;
 
 /// App state, at minimum needs to maintain the ephemeral keypair.  
 pub struct AppState {
     /// Ephemeral keypair on boot
     pub eph_kp: Ed25519KeyPair,
-    /// Database connection pool
-    pub db: PgPool,
+    /// Redis connection manager
+    pub redis: ConnectionManager,
 }
 
 /// Enclave errors enum.
