@@ -1,10 +1,8 @@
-use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
+use axum::{http::StatusCode, response::Json, routing::post, Router};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use crate::database::DbPool;
-
-pub fn create_router() -> Router<DbPool> {
+pub fn create_router() -> Router {
     Router::new()
         .route("/api/streams/start", post(start_stream))
         .route("/api/streams/end", post(end_stream))
@@ -77,7 +75,6 @@ struct EnclaveSessionData {
 /// - Update stream object on-chain
 /// - Emit events for stream start
 async fn start_stream(
-    State(_db): State<DbPool>,
     Json(_request): Json<StreamStartRequest>,
 ) -> Result<Json<StreamStartResponse>, (StatusCode, String)> {
     info!("Starting stream");
@@ -102,7 +99,6 @@ async fn start_stream(
 /// 3. Publishes hash to Sui blockchain
 /// 4. Cleans up sessions from Redis after successful upload
 async fn end_stream(
-    State(_db): State<DbPool>,
     Json(request): Json<StreamEndRequest>,
 ) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
     info!(

@@ -1,12 +1,11 @@
-use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
+use axum::{http::StatusCode, response::Json, routing::post, Router};
 use serde::{Deserialize, Serialize};
 use std::env;
 use tracing::{error, info};
 
-use crate::database::DbPool;
 use crate::models::session::*;
 
-pub fn create_router() -> Router<DbPool> {
+pub fn create_router() -> Router {
     Router::new()
         .route("/api/sessions/open", post(open_session))
         .route("/api/sessions/close", post(close_session))
@@ -29,7 +28,6 @@ struct EnclaveCloseSessionResponse {
 }
 
 async fn open_session(
-    State(_db): State<DbPool>,
     Json(request): Json<OpenSessionRequest>,
 ) -> Result<Json<OpenSessionResponse>, (StatusCode, String)> {
     info!(
@@ -76,16 +74,13 @@ async fn open_session(
     }
 
     // Parse response
-    let enclave_response: EnclaveOpenSessionResponse = response
-        .json()
-        .await
-        .map_err(|e| {
-            error!("Failed to parse enclave response: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("TEE response parsing error: {}", e),
-            )
-        })?;
+    let enclave_response: EnclaveOpenSessionResponse = response.json().await.map_err(|e| {
+        error!("Failed to parse enclave response: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("TEE response parsing error: {}", e),
+        )
+    })?;
 
     info!(
         "Session {} opened successfully",
@@ -102,7 +97,6 @@ async fn open_session(
 }
 
 async fn close_session(
-    State(_db): State<DbPool>,
     Json(request): Json<CloseSessionRequest>,
 ) -> Result<Json<CloseSessionResponse>, (StatusCode, String)> {
     info!("Closing session {}", request.session_id);

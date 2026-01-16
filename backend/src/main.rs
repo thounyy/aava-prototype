@@ -1,5 +1,4 @@
 mod api;
-mod database;
 mod models;
 mod sui;
 
@@ -12,16 +11,11 @@ async fn main() -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    // Initialize database
-    let db = database::init().await?;
-    info!("Database initialized");
-
     // Create application router
     let app = Router::new()
         .merge(api::viewers::create_router())
         .merge(api::sessions::create_router())
-        .merge(api::streams::create_router())
-        .with_state(db);
+        .merge(api::streams::create_router());
 
     // Start server
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));

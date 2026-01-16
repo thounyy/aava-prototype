@@ -1,16 +1,14 @@
 use axum::{http::StatusCode, response::Json, routing::post, Router};
 use tracing::info;
 
-use crate::database::DbPool;
 use crate::models::viewer::*;
 
-pub fn create_router() -> Router<DbPool> {
-    Router::new()
-        .route("/api/viewers/account/create", post(create_account))
-        // .route("/api/account/get", get(get_account))
-        // .route("/api/account/exists", get(account_exists))
-        // .route("/api/sessions/open", post(open_session))
-        // .route("/api/permissions/check", post(check_permissions))
+pub fn create_router() -> Router {
+    Router::new().route("/api/viewers/account/create", post(create_account))
+    // .route("/api/account/get", get(get_account))
+    // .route("/api/account/exists", get(account_exists))
+    // .route("/api/sessions/open", post(open_session))
+    // .route("/api/permissions/check", post(check_permissions))
 }
 
 async fn create_account(
@@ -26,7 +24,6 @@ async fn create_account(
 }
 
 // async fn check_permissions(
-//     State(_db): State<DbPool>,
 //     Json(request): Json<SessionRequest>,
 // ) -> Result<Json<PermissionCheck>, (StatusCode, String)> {
 //     info!(
