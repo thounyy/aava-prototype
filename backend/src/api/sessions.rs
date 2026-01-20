@@ -1,14 +1,57 @@
 use axum::{http::StatusCode, response::Json, routing::post, Router};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::env;
 use tracing::{error, info};
-
-use crate::models::session::*;
+use uuid::Uuid;
 
 pub fn create_router() -> Router {
     Router::new()
         .route("/api/sessions/open", post(open_session))
         .route("/api/sessions/close", post(close_session))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Session {
+    pub id: Uuid,
+    pub viewer_id: String,
+    pub stream_id: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenSessionRequest {
+    pub viewer_id: String,
+    pub stream_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenSessionResponse {
+    pub session_id: String,
+    pub viewer_id: String,
+    pub stream_id: String,
+    pub status: SessionStatus,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloseSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloseSessionResponse {
+    pub session_id: String,
+    pub status: SessionStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SessionStatus {
+    Open,
+    Active,
+    Closed,
+    Error(String),
 }
 
 /// Response from the enclave for session creation

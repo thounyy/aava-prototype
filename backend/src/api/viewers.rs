@@ -1,7 +1,6 @@
 use axum::{http::StatusCode, response::Json, routing::post, Router};
+use serde::{Deserialize, Serialize};
 use tracing::info;
-
-use crate::models::viewer::*;
 
 pub fn create_router() -> Router {
     Router::new().route("/api/viewers/account/create", post(create_account))
@@ -9,6 +8,17 @@ pub fn create_router() -> Router {
     // .route("/api/account/exists", get(account_exists))
     // .route("/api/sessions/open", post(open_session))
     // .route("/api/permissions/check", post(check_permissions))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateViewerAccountRequest {
+    pub user_handle: String, // to define (could be platform user id)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateViewerAccountResponse {
+    pub user_handle: String,
+    pub account_id: String,
 }
 
 async fn create_account(
