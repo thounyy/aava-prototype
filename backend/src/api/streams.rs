@@ -2,6 +2,11 @@ use axum::{http::StatusCode, response::Json, routing::post, Router};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
+use crate::sui::stream::{
+    certify_blob_on_sui, delete_registered_blob, verify_and_register_dataset,
+};
+use crate::walrus::blobs::publish_dataset_to_walrus;
+
 pub fn create_router() -> Router {
     Router::new()
         .route("/api/streams/start", post(start_stream))
@@ -27,8 +32,6 @@ pub struct StreamEndRequest {
 pub struct StreamEndResponse {
     pub stream_id: String,
     pub sessions_count: u64,
-    pub walrus_url: Option<String>,
-    pub status: String,
 }
 
 // Enclave response types for deserializing the signed session data
@@ -38,27 +41,22 @@ struct EnclaveEndStreamResponse {
     signature: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct EnclaveIntentMessage {
-    #[allow(dead_code)]
     intent: u8,
-    #[allow(dead_code)]
     timestamp_ms: u64,
     data: EnclaveStreamData,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct EnclaveStreamData {
-    #[allow(dead_code)]
     stream_id: String,
-    #[allow(dead_code)]
     sessions: Vec<EnclaveSessionData>,
     sessions_count: u64,
     data_hash: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[derive(Debug, Deserialize, Serialize)]
 struct EnclaveSessionData {
     session_id: String,
     viewer_id: String,
@@ -107,39 +105,64 @@ async fn end_stream(
     );
 
     // Step 1: Fetch attested sessions from enclave
-    let (sessions_count, data_hash, signature) =
-        fetch_signed_sessions_from_enclave(&request.stream_id).await?;
+    let (data, signature) = fetch_signed_sessions_from_enclave(&request.stream_id).await?;
 
-    if sessions_count == 0 {
+    if data.sessions_count == 0 {
         warn!("No active sessions found for stream {}", request.stream_id);
         return Ok(Json(StreamEndResponse {
             stream_id: request.stream_id,
             sessions_count: 0,
-            walrus_url: None,
-            status: "completed".to_string(),
         }));
     }
 
-    // Step 2: Upload to Walrus
-    let walrus_url =
-        upload_dataset_to_walrus(&request.stream_id, sessions_count, &data_hash).await?;
+    // Step 2: Verify signature + register blob on Sui (single tx placeholder)
+    let (object_id, blob_id) =
+        verify_and_register_dataset(&request.stream_id, &data.data_hash, &signature).await?;
+    info!(
+        "Sui tx submitted for stream {}: blob_id={}, object_id={}",
+        request.stream_id, blob_id, object_id
+    );
 
-    // Step 3: Publish hash to Sui
-    publish_hash_to_sui(&request.stream_id, &walrus_url, &data_hash, &signature).await?;
+    // Step 3: Upload data to Walrus using the registered blob_id after Sui tx success
+    let payload = serde_json::to_vec(&data).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize Walrus payload: {e}"),
+        )
+    })?;
+
+    let confirmation_certificate =
+        match publish_dataset_to_walrus(&blob_id, &object_id, payload).await {
+            Ok(result) => result,
+            Err(e) => {
+                let _ = delete_registered_blob(&object_id).await;
+                return Err((
+                    StatusCode::BAD_GATEWAY,
+                    format!("Walrus publish error: {e}"),
+                ));
+            }
+        };
+
+    info!(
+        "Walrus upload succeeded for stream {}: blob_id={}, blob_object_id={}",
+        request.stream_id, blob_id, object_id
+    );
+
+    // Step 3b: Certify the blob on Sui using the confirmation certificate (placeholder).
+    certify_blob_on_sui(&blob_id, &confirmation_certificate).await?;
 
     // Step 4: Cleanup stream data from Redis after successful Walrus upload
     cleanup_stream_from_enclave(&request.stream_id).await?;
 
     info!(
-        "Stream {} ended: {} sessions processed, attested by enclave, uploaded to Walrus, and cleaned up",
-        request.stream_id, sessions_count
+        "Stream {} ended: {} sessions processed, verified+registered on Sui, uploaded+certified on Walrus/Sui, and cleaned up",
+        request.stream_id,
+        data.sessions_count
     );
 
     Ok(Json(StreamEndResponse {
         stream_id: request.stream_id,
-        sessions_count,
-        walrus_url,
-        status: "completed".to_string(),
+        sessions_count: data.sessions_count,
     }))
 }
 
@@ -150,7 +173,7 @@ async fn end_stream(
 /// Returns (sessions_count, data_hash, signature)
 async fn fetch_signed_sessions_from_enclave(
     stream_id: &str,
-) -> Result<(u64, String, String), (StatusCode, String)> {
+) -> Result<(EnclaveStreamData, String), (StatusCode, String)> {
     let enclave_url =
         std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
@@ -193,67 +216,17 @@ async fn fetch_signed_sessions_from_enclave(
         )
     })?;
 
-    let sessions_count = enclave_response.response.data.sessions_count;
-    let data_hash = enclave_response.response.data.data_hash;
     let signature = enclave_response.signature;
 
     info!(
-        "Received {} sessions from enclave with attestation (hash: {}, signature: {})",
-        sessions_count,
-        data_hash,
+        "Received {} sessions for stream {} from enclave with attestation (hash: {}, signature: {})",
+        enclave_response.response.data.sessions_count,
+        enclave_response.response.data.stream_id,
+        enclave_response.response.data.data_hash,
         &signature[..16] // Show first 16 chars of signature
     );
 
-    Ok((sessions_count, data_hash, signature))
-}
-
-/// Upload session data to Walrus (placeholder)
-async fn upload_dataset_to_walrus(
-    stream_id: &str,
-    sessions_count: u64,
-    data_hash: &str,
-) -> Result<Option<String>, (StatusCode, String)> {
-    info!(
-        "Session data ready for Walrus upload: {} sessions, hash: {}",
-        sessions_count, data_hash
-    );
-
-    // TODO: Real Walrus implementation
-    // - Upload session data + attestation to Walrus
-    // - Get content hash and URL
-    // Example:
-    // let walrus_result = walrus::upload(&session_data, &signature).await?;
-    // let walrus_url = walrus_result.url;
-
-    warn!("[PLACEHOLDER] Publishing to Walrus - not implemented");
-    Ok(Some(format!(
-        "walrus://placeholder/{}/sessions.json",
-        stream_id
-    )))
-}
-
-/// Publish proof to Sui blockchain (placeholder)
-async fn publish_hash_to_sui(
-    _stream_id: &str,
-    _walrus_url: &Option<String>,
-    _data_hash: &str,
-    _signature: &str,
-) -> Result<(), (StatusCode, String)> {
-    // TODO: Real Sui implementation
-    // - Submit proof transaction to Sui
-    // - Include enclave signature and data hash for verification
-    // - Wait for transaction confirmation
-    // Example:
-    // let tx_result = sui::publish_stream_proof(
-    //     stream_id,
-    //     proof_hash,
-    //     walrus_url,
-    //     data_hash,
-    //     &signature
-    // ).await?;
-
-    warn!("[PLACEHOLDER] Publishing proof to Sui - not implemented");
-    Ok(())
+    Ok((enclave_response.response.data, signature))
 }
 
 /// Cleanup stream data from Redis after successful Walrus upload

@@ -137,9 +137,8 @@ pub async fn end_stream(
     hasher.update(data_json.as_bytes());
     let data_hash = format!("{:x}", hasher.finalize());
 
-    let stream_id = request.stream_id.clone();
     let response_data = EndStreamResponse {
-        stream_id: stream_id.clone(),
+        stream_id: request.stream_id.clone(),
         sessions,
         sessions_count,
         data_hash,
@@ -160,7 +159,7 @@ pub async fn end_stream(
 
     info!(
         "Stream {} ended: {} sessions attested and signed",
-        stream_id, sessions_count
+        request.stream_id, sessions_count
     );
 
     Ok(Json(signed_response))

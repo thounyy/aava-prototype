@@ -1,6 +1,7 @@
 mod api;
 mod models;
 mod sui;
+mod walrus;
 
 use axum::Router;
 use std::net::SocketAddr;

@@ -52,7 +52,7 @@ pub async fn open_session(
     );
 
     // Generate unique session ID
-    let session_id = Uuid::new_v4().to_string();
+    let session_id = Uuid::new_v4().to_string(); // TODO: should be 56-bit
     let status = "created";
     let created_at = chrono::Utc::now().to_rfc3339();
 
