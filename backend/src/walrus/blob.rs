@@ -103,9 +103,9 @@ pub enum BlobStoreResult {
     },
 }
 
-pub async fn publish_dataset_to_walrus(
+pub async fn upload_dataset(
+    object_id: &str,
     blob_id: &str,
-    blob_object_id: &str,
     dataset: Vec<u8>,
 ) -> Result<serde_json::Value, WalrusError> {
     let client = reqwest::Client::new();
@@ -113,7 +113,7 @@ pub async fn publish_dataset_to_walrus(
         .unwrap_or_else(|_| DEFAULT_UPLOAD_RELAY_URL.to_string());
     let url = format!(
         "{}/v1/blob-upload-relay?blob_id={}&deletable_blob_object={}",
-        relay_base_url, blob_id, blob_object_id
+        relay_base_url, blob_id, object_id
     );
 
     let response = client.post(url).body(dataset).send().await?;

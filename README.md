@@ -253,7 +253,7 @@ The architecture ensures data integrity through multiple layers:
 **Enclave:**
 - `REDIS_URL`: Redis connection URL (default: `redis://localhost:6379`)
 - `REDIS_PASSWORD`: Redis password (recommended, more secure than URL)
-  - Alternative: Include password in `REDIS_URL` as `redis://:password@localhost:6379`
+- Alternative: Include password in `REDIS_URL` as `redis://:password@localhost:6379`
 
 ### Ports
 

@@ -7,7 +7,7 @@ use tracing::{info, warn};
 /// - verifies the nautilus signature
 /// - registers the Walrus blob (or returns the blob/object IDs)
 /// - attaches the object to the streamer account
-pub async fn verify_and_register_dataset(
+pub async fn verify_and_register_blob_on_sui(
     stream_id: &str,
     data_hash: &str,
     signature: &str,
@@ -29,13 +29,15 @@ pub async fn verify_and_register_dataset(
 }
 
 /// Certify a blob on Sui after receiving a confirmation certificate from the upload relay.
-pub async fn certify_blob_on_sui(
+/// and add it to the streamer's account.
+pub async fn certify_and_store_blob_on_sui(
+    object_id: &str,
     blob_id: &str,
     confirmation_certificate: &serde_json::Value,
 ) -> Result<(), (StatusCode, String)> {
     warn!(
-        "[PLACEHOLDER] Certifying blob {} on Sui with confirmation certificate",
-        blob_id
+        "[PLACEHOLDER] Certifying blob {} (obj_id: {}) on Sui with confirmation certificate",
+        object_id, blob_id
     );
     // TODO: Real Sui call to certify the blob using the certificate.
     let _ = confirmation_certificate;
@@ -43,11 +45,20 @@ pub async fn certify_blob_on_sui(
 }
 
 /// Cleanup helper for cases where Sui registration succeeded but Walrus upload failed.
-pub async fn delete_registered_blob(blob_object_id: &str) -> Result<(), (StatusCode, String)> {
+pub async fn destroy_blob_on_sui(object_id: &str) -> Result<(), (StatusCode, String)> {
     warn!(
         "[PLACEHOLDER] Deleting registered blob object {} on Sui",
-        blob_object_id
+        object_id
     );
     // TODO: Real Sui delete call for deletable blobs.
+    Ok(())
+}
+
+pub async fn flag_stream_as_invalid_on_sui(stream_id: &str) -> Result<(), (StatusCode, String)> {
+    warn!(
+        "[PLACEHOLDER] Flagging stream {} as invalid on Sui",
+        stream_id
+    );
+    // TODO: Real Sui call to mark the stream as invalid.
     Ok(())
 }

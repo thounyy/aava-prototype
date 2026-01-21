@@ -1,12 +1,13 @@
 use axum::{http::StatusCode, response::Json, routing::post, Router};
 use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::enclave::streams::{cleanup_stream_from_enclave, fetch_signed_sessions_from_enclave};
 use crate::sui::stream::{
-    certify_blob_on_sui, delete_registered_blob, verify_and_register_dataset,
+    certify_and_store_blob_on_sui, destroy_blob_on_sui, flag_stream_as_invalid_on_sui,
+    verify_and_register_blob_on_sui,
 };
-use crate::walrus::blob::publish_dataset_to_walrus;
+use crate::walrus::blob::upload_dataset;
 
 pub fn create_router() -> Router {
     Router::new()
@@ -85,12 +86,30 @@ async fn end_stream(
         }));
     }
 
-    // Step 2: Verify signature + register blob on Sui (single tx placeholder)
-    let (object_id, blob_id) =
-        verify_and_register_dataset(&request.stream_id, &data.data_hash, &signature).await?;
+    // Step 2: Verify signature + register blob on Sui (atomic tx)
+    let (object_id, blob_id) = match verify_and_register_blob_on_sui(
+        &request.stream_id,
+        &data.data_hash,
+        &signature,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err((status, message)) => {
+            error!(
+                "Sui verification/registration failed for stream {}: {}",
+                request.stream_id, message
+            );
+
+            // TODO: Store flawed stream data in Postgres for quarantine/audit.
+            let _ = flag_stream_as_invalid_on_sui(&request.stream_id).await;
+
+            return Err((status, message));
+        }
+    };
     info!(
-        "Sui tx submitted for stream {}: blob_id={}, object_id={}",
-        request.stream_id, blob_id, object_id
+        "Sui tx submitted for stream {}: object_id={}, blob_id={}",
+        request.stream_id, object_id, blob_id
     );
 
     // Step 3: Upload data to Walrus using the registered blob_id after Sui tx success
@@ -101,25 +120,24 @@ async fn end_stream(
         )
     })?;
 
-    let confirmation_certificate =
-        match publish_dataset_to_walrus(&blob_id, &object_id, payload).await {
-            Ok(result) => result,
-            Err(e) => {
-                let _ = delete_registered_blob(&object_id).await;
-                return Err((
-                    StatusCode::BAD_GATEWAY,
-                    format!("Walrus publish error: {e}"),
-                ));
-            }
-        };
+    let confirmation_certificate = match upload_dataset(&object_id, &blob_id, payload).await {
+        Ok(result) => result,
+        Err(e) => {
+            let _ = destroy_blob_on_sui(&object_id).await;
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                format!("Walrus publish error: {e}"),
+            ));
+        }
+    };
 
     info!(
-        "Walrus upload succeeded for stream {}: blob_id={}, blob_object_id={}",
-        request.stream_id, blob_id, object_id
+        "Walrus upload succeeded for stream {}: object_id={}, blob_id={}",
+        request.stream_id, object_id, blob_id
     );
 
     // Step 3b: Certify the blob on Sui using the confirmation certificate (placeholder).
-    certify_blob_on_sui(&blob_id, &confirmation_certificate).await?;
+    certify_and_store_blob_on_sui(&object_id, &blob_id, &confirmation_certificate).await?;
 
     // Step 4: Cleanup stream data from Redis after successful Walrus upload
     cleanup_stream_from_enclave(&request.stream_id).await?;

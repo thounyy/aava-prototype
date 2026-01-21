@@ -42,14 +42,10 @@ pub async fn fetch_signed_sessions_from_enclave(
     let enclave_url =
         std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-    let request_body = serde_json::json!({
-        "stream_id": stream_id,
-    });
-
     let client = reqwest::Client::new();
     let response = client
         .post(&format!("{}/end_stream", enclave_url))
-        .json(&request_body)
+        .json(&serde_json::json!({ "stream_id": stream_id }))
         .send()
         .await
         .map_err(|e| {
@@ -81,17 +77,15 @@ pub async fn fetch_signed_sessions_from_enclave(
         )
     })?;
 
-    let signature = enclave_response.signature;
-
     info!(
         "Received {} sessions for stream {} from enclave with attestation (hash: {}, signature: {})",
         enclave_response.response.data.sessions_count,
         enclave_response.response.data.stream_id,
         enclave_response.response.data.data_hash,
-        &signature[..16]
+        &enclave_response.signature[..16],
     );
 
-    Ok((enclave_response.response.data, signature))
+    Ok((enclave_response.response.data, enclave_response.signature))
 }
 
 /// Cleanup stream data from Redis after successful Walrus upload.
@@ -149,4 +143,3 @@ pub async fn cleanup_stream_from_enclave(stream_id: &str) -> Result<(), (StatusC
 
     Ok(())
 }
-
