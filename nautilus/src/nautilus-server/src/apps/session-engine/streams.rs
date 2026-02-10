@@ -8,7 +8,12 @@ use axum::extract::State;
 use axum::Json;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde_bytes::ByteBuf;
+use std::num::NonZeroU16;
+use walrus_core::{
+    EncodingType,
+    encoding::{EncodingConfig, EncodingFactory},
+};
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -25,7 +30,7 @@ pub struct EndStreamResponse {
     pub stream_id: String,
     pub sessions: Vec<SessionData>,
     pub sessions_count: u64,
-    pub data_hash: String,
+    pub blob_id: ByteBuf,
 }
 
 /// Request payload for cleaning up sessions after Walrus upload
@@ -130,18 +135,18 @@ pub async fn end_stream(
 
     let sessions_count = sessions.len() as u64;
 
-    // Calculate hash of the session data for verification
+    // Serialize session data and compute Walrus blob metadata for verification.
     let data_json = serde_json::to_string(&sessions)
         .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize sessions: {}", e)))?;
-    let mut hasher = Sha256::new();
-    hasher.update(data_json.as_bytes());
-    let data_hash = format!("{:x}", hasher.finalize());
+    let blob_id = compute_walrus_blob_id(data_json.as_bytes()).map_err(|e| {
+        EnclaveError::GenericError(format!("Failed to compute Walrus blob id: {}", e))
+    })?;
 
     let response_data = EndStreamResponse {
         stream_id: request.stream_id.clone(),
         sessions,
         sessions_count,
-        data_hash,
+        blob_id: ByteBuf::from(blob_id),
     };
 
     // Generate cryptographic attestation using enclave keypair
@@ -154,7 +159,7 @@ pub async fn end_stream(
         &state.eph_kp,
         response_data,
         timestamp_ms,
-        IntentScope::ProcessData,
+        IntentScope::HashSessions,
     );
 
     info!(
@@ -223,4 +228,17 @@ pub async fn cleanup_stream(
         "deleted_count": deleted_count,
         "status": "completed"
     })))
+}
+
+fn compute_walrus_blob_id(blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+    let n_shards = std::env::var("WALRUS_N_SHARDS")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(31);
+    let n_shards = NonZeroU16::new(n_shards)
+        .ok_or_else(|| anyhow::anyhow!("WALRUS_N_SHARDS must be > 0"))?;
+
+    let config = EncodingConfig::new(n_shards).get_for_type(EncodingType::RS2);
+    let metadata = config.compute_metadata(blob)?;
+    Ok(metadata.blob_id().as_ref().to_vec())
 }

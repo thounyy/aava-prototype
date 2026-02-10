@@ -1,4 +1,6 @@
 use axum::http::StatusCode;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use tracing::{info, warn};
 
 /// Verify the enclave signature and register the blob on Sui in a single transaction.
@@ -9,23 +11,61 @@ use tracing::{info, warn};
 /// - attaches the object to the streamer account
 pub async fn verify_and_register_blob_on_sui(
     stream_id: &str,
-    data_hash: &str,
+    blob_id: &[u8],
+    timestamp_ms: u64,
     signature: &str,
-) -> Result<(String, String), (StatusCode, String)> {
+) -> Result<String, (StatusCode, String)> {
+    if blob_id.len() != 32 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid blob_id length {}, expected 32 bytes",
+                blob_id.len()
+            ),
+        ));
+    }
+
     info!(
-        "[PLACEHOLDER] Verifying signature + registering blob on Sui for stream {} (hash: {}, sig: {})",
+        "[PLACEHOLDER] Verifying signature + registering blob on Sui for stream {} (blob_id: {}, sig: {})",
         stream_id,
-        data_hash,
+        URL_SAFE_NO_PAD.encode(blob_id),
         &signature[..signature.len().min(16)]
     );
 
-    // TODO: Real Sui transaction submission.
-    // - Call Move function to verify signature and register blob
-    // - info! the tx digest
-    // - Return the resulting blob ID and object ID
-    warn!("[PLACEHOLDER] Sui verify/register not implemented");
+    let object_id = call_creator_end_stream_on_sui(
+        stream_id,
+        blob_id,
+        timestamp_ms,
+        signature,
+    )
+    .await?;
 
-    Ok(("object_id".to_string(), "blob_id".to_string()))
+    Ok(object_id)
+}
+
+async fn call_creator_end_stream_on_sui(
+    stream_id: &str,
+    blob_id: &[u8],
+    timestamp_ms: u64,
+    signature: &str,
+) -> Result<String, (StatusCode, String)> {
+    warn!(
+        "[PLACEHOLDER] Calling aava::creator::end_stream on Sui for stream {}",
+        stream_id
+    );
+    // TODO: Real Sui transaction submission.
+    // Required Move args (from creator.move):
+    // - account, enclave, system, storage
+    // - stream_id
+    // - blob_id
+    // - timestamp_ms
+    // - signature
+    // - blob_id (u256), root_hash (u256), size (u64), encoding_type (u8), deletable (bool)
+    // - write_payment (Coin<WAL>)
+    // - ctx
+    let _ = (blob_id, timestamp_ms, signature);
+
+    Ok("object_id".to_string())
 }
 
 /// Certify a blob on Sui after receiving a confirmation certificate from the upload relay.

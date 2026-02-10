@@ -1,6 +1,8 @@
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
+use serde_bytes::ByteBuf;
 use tracing::{error, info};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
 // Enclave response types for deserializing the signed session data
 #[derive(Debug, Deserialize)]
@@ -21,7 +23,7 @@ pub struct EnclaveStreamData {
     pub stream_id: String,
     pub sessions: Vec<EnclaveSessionData>,
     pub sessions_count: u64,
-    pub data_hash: String,
+    pub blob_id: ByteBuf,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -35,10 +37,10 @@ pub struct EnclaveSessionData {
 
 /// Fetch attested session data from the enclave.
 ///
-/// Returns (data, signature).
+/// Returns (data, signature, timestamp_ms).
 pub async fn fetch_signed_sessions_from_enclave(
     stream_id: &str,
-) -> Result<(EnclaveStreamData, String), (StatusCode, String)> {
+) -> Result<(EnclaveStreamData, String, u64), (StatusCode, String)> {
     let enclave_url =
         std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
@@ -78,14 +80,18 @@ pub async fn fetch_signed_sessions_from_enclave(
     })?;
 
     info!(
-        "Received {} sessions for stream {} from enclave with attestation (hash: {}, signature: {})",
+        "Received {} sessions for stream {} from enclave with attestation (blob_id: {}, signature: {})",
         enclave_response.response.data.sessions_count,
         enclave_response.response.data.stream_id,
-        enclave_response.response.data.data_hash,
+        URL_SAFE_NO_PAD.encode(enclave_response.response.data.blob_id.as_ref()),
         &enclave_response.signature[..16],
     );
 
-    Ok((enclave_response.response.data, enclave_response.signature))
+    Ok((
+        enclave_response.response.data,
+        enclave_response.signature,
+        enclave_response.response.timestamp_ms,
+    ))
 }
 
 /// Cleanup stream data from Redis after successful Walrus upload.

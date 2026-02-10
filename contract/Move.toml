@@ -3,3 +3,8 @@ name = "aava"
 edition = "2024"
 license = "Apache-2.0"
 authors = [ "Thouny (thouny@tuta.io)" ]
+
+[dependencies]
+walrus = { git = "https://github.com/MystenLabs/walrus.git", rev = "main", subdir = "contracts/walrus" }
+wal = { git = "https://github.com/MystenLabs/walrus.git", rev = "main", subdir = "contracts/wal" }
+enclave = { git = "https://github.com/MystenLabs/nautilus.git", rev = "main", subdir = "move/enclave" }
