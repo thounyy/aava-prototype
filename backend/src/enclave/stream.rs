@@ -24,6 +24,9 @@ pub struct EnclaveStreamData {
     pub sessions: Vec<EnclaveSessionData>,
     pub sessions_count: u64,
     pub blob_id: ByteBuf,
+    pub root_hash: ByteBuf,
+    pub size: u64,
+    pub encoding_type: u8,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -38,7 +41,7 @@ pub struct EnclaveSessionData {
 /// Fetch attested session data from the enclave.
 ///
 /// Returns (data, signature, timestamp_ms).
-pub async fn fetch_signed_sessions_from_enclave(
+pub async fn fetch_signed_dataset(
     stream_id: &str,
 ) -> Result<(EnclaveStreamData, String, u64), (StatusCode, String)> {
     let enclave_url =
@@ -95,7 +98,7 @@ pub async fn fetch_signed_sessions_from_enclave(
 }
 
 /// Cleanup stream data from Redis after successful Walrus upload.
-pub async fn cleanup_stream_from_enclave(stream_id: &str) -> Result<(), (StatusCode, String)> {
+pub async fn cleanup_dataset(stream_id: &str) -> Result<(), (StatusCode, String)> {
     let enclave_url =
         std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 

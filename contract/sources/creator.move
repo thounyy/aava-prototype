@@ -20,7 +20,7 @@ use enclave::enclave::Enclave;
 use aava::{
     account_registry::AccountRegistry,
     protocol_authority::CreatorRequest,
-    sessions_hash::{Self, SESSIONS_HASH},
+    blob_id::{Self, BLOB_ID},
 };
 
 // === Aliases ===
@@ -92,11 +92,10 @@ public fun start_stream(
 
 public fun end_stream(
     account: &mut Account,
-    enclave: &Enclave<SESSIONS_HASH>,
+    enclave: &Enclave<BLOB_ID>,
     system: &mut System,
     storage: Storage,
     stream_id: ID,
-    blob_id_bytes: vector<u8>,
     timestamp_ms: u64,
     sig: &vector<u8>,
     blob_id: u256,
@@ -108,7 +107,7 @@ public fun end_stream(
     ctx: &mut TxContext,
 ) {
     // verify the blob_id bytes from the enclave
-    sessions_hash::verify(enclave, blob_id_bytes, timestamp_ms, sig);
+    sessions_hash::verify(enclave, blob_id, timestamp_ms, sig);
 
     let key = StreamKey(stream_id);
     let stream: &mut Stream = account.id.borrow_mut(key);

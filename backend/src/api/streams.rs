@@ -1,14 +1,11 @@
 use axum::{http::StatusCode, response::Json, routing::post, Router};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
-use crate::enclave::streams::{cleanup_stream_from_enclave, fetch_signed_sessions_from_enclave};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use crate::sui::stream::{
-    certify_and_store_blob_on_sui, destroy_blob_on_sui, flag_stream_as_invalid_on_sui,
-    verify_and_register_blob_on_sui,
-};
-use crate::walrus::blob::upload_dataset;
+use crate::enclave;
+use crate::sui;
+use crate::walrus;
 
 pub fn create_router() -> Router {
     Router::new()
@@ -78,7 +75,7 @@ async fn end_stream(
 
     // Step 1: Fetch attested sessions from enclave
     let (data, signature, timestamp_ms) =
-        fetch_signed_sessions_from_enclave(&request.stream_id).await?;
+        enclave::stream::fetch_signed_dataset(&request.stream_id).await?;
 
     if data.sessions_count == 0 {
         warn!("No active sessions found for stream {}", request.stream_id);
@@ -89,9 +86,20 @@ async fn end_stream(
     }
 
     // Step 2: Verify signature + register blob on Sui (atomic tx)
-    let object_id = match verify_and_register_blob_on_sui(
+    let payload = serde_json::to_vec(&data).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize Walrus payload: {e}"),
+        )
+    })?;
+
+    let object_id = match sui::stream::verify_and_register_blob(
         &request.stream_id,
         &data.blob_id,
+        &data.root_hash,
+        data.size,
+        data.encoding_type,
+        true,
         timestamp_ms,
         &signature,
     )
@@ -105,29 +113,24 @@ async fn end_stream(
             );
 
             // TODO: Store flawed stream data in Postgres for quarantine/audit.
-            let _ = flag_stream_as_invalid_on_sui(&request.stream_id).await;
+            let _ = sui::stream::flag_stream_as_invalid(&request.stream_id).await;
 
             return Err((status, message));
         }
     };
     info!(
         "Sui tx submitted for stream {}: object_id={}, blob_id={}",
-        request.stream_id, object_id, URL_SAFE_NO_PAD.encode(data.blob_id.as_ref())
+        request.stream_id,
+        object_id,
+        URL_SAFE_NO_PAD.encode(data.blob_id.as_ref())
     );
 
     // Step 3: Upload data to Walrus using the registered blob_id after Sui tx success
-    let payload = serde_json::to_vec(&data).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize Walrus payload: {e}"),
-        )
-    })?;
-
     let blob_id_b64 = URL_SAFE_NO_PAD.encode(data.blob_id.as_ref());
-    let confirmation_certificate = match upload_dataset(&object_id, &blob_id_b64, payload).await {
+    let confirmation_certificate = match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
         Ok(result) => result,
         Err(e) => {
-            let _ = destroy_blob_on_sui(&object_id).await;
+            let _ = sui::stream::destroy_blob(&object_id).await;
             return Err((
                 StatusCode::BAD_GATEWAY,
                 format!("Walrus publish error: {e}"),
@@ -141,10 +144,10 @@ async fn end_stream(
     );
 
     // Step 3b: Certify the blob on Sui using the confirmation certificate (placeholder).
-    certify_and_store_blob_on_sui(&object_id, &blob_id_b64, &confirmation_certificate).await?;
+    sui::stream::certify_and_store_blob(&object_id, &blob_id_b64, &confirmation_certificate).await?;
 
     // Step 4: Cleanup stream data from Redis after successful Walrus upload
-    cleanup_stream_from_enclave(&request.stream_id).await?;
+    enclave::stream::cleanup_dataset(&request.stream_id).await?;
 
     info!(
         "Stream {} ended: {} sessions processed, verified+registered on Sui, uploaded+certified on Walrus/Sui, and cleaned up",

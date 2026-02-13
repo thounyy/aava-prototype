@@ -9,9 +9,13 @@ use tracing::{info, warn};
 /// - verifies the nautilus signature
 /// - registers the Walrus blob (or returns the blob/object IDs)
 /// - attaches the object to the streamer account
-pub async fn verify_and_register_blob_on_sui(
+pub async fn verify_and_register_blob(
     stream_id: &str,
     blob_id: &[u8],
+    root_hash: &[u8],
+    size: u64,
+    encoding_type: u8,
+    deletable: bool,
     timestamp_ms: u64,
     signature: &str,
 ) -> Result<String, (StatusCode, String)> {
@@ -24,6 +28,15 @@ pub async fn verify_and_register_blob_on_sui(
             ),
         ));
     }
+    if root_hash.len() != 32 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid root_hash length {}, expected 32 bytes",
+                root_hash.len()
+            ),
+        ));
+    }
 
     info!(
         "[PLACEHOLDER] Verifying signature + registering blob on Sui for stream {} (blob_id: {}, sig: {})",
@@ -32,9 +45,13 @@ pub async fn verify_and_register_blob_on_sui(
         &signature[..signature.len().min(16)]
     );
 
-    let object_id = call_creator_end_stream_on_sui(
+    let object_id = call_creator_end_stream(
         stream_id,
         blob_id,
+        root_hash,
+        size,
+        encoding_type,
+        deletable,
         timestamp_ms,
         signature,
     )
@@ -43,9 +60,13 @@ pub async fn verify_and_register_blob_on_sui(
     Ok(object_id)
 }
 
-async fn call_creator_end_stream_on_sui(
+async fn call_creator_end_stream(
     stream_id: &str,
     blob_id: &[u8],
+    root_hash: &[u8],
+    size: u64,
+    encoding_type: u8,
+    deletable: bool,
     timestamp_ms: u64,
     signature: &str,
 ) -> Result<String, (StatusCode, String)> {
@@ -63,14 +84,22 @@ async fn call_creator_end_stream_on_sui(
     // - blob_id (u256), root_hash (u256), size (u64), encoding_type (u8), deletable (bool)
     // - write_payment (Coin<WAL>)
     // - ctx
-    let _ = (blob_id, timestamp_ms, signature);
+    let _ = (
+        blob_id,
+        root_hash,
+        size,
+        encoding_type,
+        deletable,
+        timestamp_ms,
+        signature,
+    );
 
     Ok("object_id".to_string())
 }
 
 /// Certify a blob on Sui after receiving a confirmation certificate from the upload relay.
 /// and add it to the streamer's account.
-pub async fn certify_and_store_blob_on_sui(
+pub async fn certify_and_store_blob(
     object_id: &str,
     blob_id: &str,
     confirmation_certificate: &serde_json::Value,
@@ -85,7 +114,7 @@ pub async fn certify_and_store_blob_on_sui(
 }
 
 /// Cleanup helper for cases where Sui registration succeeded but Walrus upload failed.
-pub async fn destroy_blob_on_sui(object_id: &str) -> Result<(), (StatusCode, String)> {
+pub async fn destroy_blob(object_id: &str) -> Result<(), (StatusCode, String)> {
     warn!(
         "[PLACEHOLDER] Deleting registered blob object {} on Sui",
         object_id
@@ -94,7 +123,7 @@ pub async fn destroy_blob_on_sui(object_id: &str) -> Result<(), (StatusCode, Str
     Ok(())
 }
 
-pub async fn flag_stream_as_invalid_on_sui(stream_id: &str) -> Result<(), (StatusCode, String)> {
+pub async fn flag_stream_as_invalid(stream_id: &str) -> Result<(), (StatusCode, String)> {
     warn!(
         "[PLACEHOLDER] Flagging stream {} as invalid on Sui",
         stream_id

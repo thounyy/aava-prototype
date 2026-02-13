@@ -13,6 +13,7 @@ use std::num::NonZeroU16;
 use walrus_core::{
     EncodingType,
     encoding::{EncodingConfig, EncodingFactory},
+    metadata::BlobMetadataApi,
 };
 use std::sync::Arc;
 use tracing::{error, info, warn};
@@ -31,6 +32,9 @@ pub struct EndStreamResponse {
     pub sessions: Vec<SessionData>,
     pub sessions_count: u64,
     pub blob_id: ByteBuf,
+    pub root_hash: ByteBuf,
+    pub size: u64,
+    pub encoding_type: u8,
 }
 
 /// Request payload for cleaning up sessions after Walrus upload
@@ -138,7 +142,7 @@ pub async fn end_stream(
     // Serialize session data and compute Walrus blob metadata for verification.
     let data_json = serde_json::to_string(&sessions)
         .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize sessions: {}", e)))?;
-    let blob_id = compute_walrus_blob_id(data_json.as_bytes()).map_err(|e| {
+    let walrus_metadata = compute_walrus_metadata(data_json.as_bytes()).map_err(|e| {
         EnclaveError::GenericError(format!("Failed to compute Walrus blob id: {}", e))
     })?;
 
@@ -146,7 +150,10 @@ pub async fn end_stream(
         stream_id: request.stream_id.clone(),
         sessions,
         sessions_count,
-        blob_id: ByteBuf::from(blob_id),
+        blob_id: ByteBuf::from(walrus_metadata.blob_id),
+        root_hash: ByteBuf::from(walrus_metadata.root_hash),
+        size: walrus_metadata.size,
+        encoding_type: walrus_metadata.encoding_type,
     };
 
     // Generate cryptographic attestation using enclave keypair
@@ -230,7 +237,14 @@ pub async fn cleanup_stream(
     })))
 }
 
-fn compute_walrus_blob_id(blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+struct WalrusMetadataBytes {
+    blob_id: Vec<u8>,
+    root_hash: Vec<u8>,
+    size: u64,
+    encoding_type: u8,
+}
+
+fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadataBytes, anyhow::Error> {
     let n_shards = std::env::var("WALRUS_N_SHARDS")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -240,5 +254,12 @@ fn compute_walrus_blob_id(blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
 
     let config = EncodingConfig::new(n_shards).get_for_type(EncodingType::RS2);
     let metadata = config.compute_metadata(blob)?;
-    Ok(metadata.blob_id().as_ref().to_vec())
+    let root_hash = metadata.metadata().compute_root_hash();
+
+    Ok(WalrusMetadataBytes {
+        blob_id: metadata.blob_id().as_ref().to_vec(),
+        root_hash: root_hash.bytes().to_vec(),
+        size: metadata.metadata().unencoded_length(),
+        encoding_type: metadata.metadata().encoding_type().into(),
+    })
 }

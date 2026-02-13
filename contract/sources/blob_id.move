@@ -1,4 +1,4 @@
-module aava::sessions_hash;
+module aava::blob_id;
 
 // === Imports ===
 
@@ -10,11 +10,11 @@ const EInvalidSignature: u64 = 1;
 
 // === Structs ===
 
-public struct SESSIONS_HASH has drop {}
+public struct BLOB_ID has drop {}
 
 // === Public functions ===
 
-fun init(otw: SESSIONS_HASH, ctx: &mut TxContext) {
+fun init(otw: BLOB_ID, ctx: &mut TxContext) {
     let cap = enclave::new_cap(otw, ctx);
 
     cap.create_enclave_config(
@@ -28,17 +28,17 @@ fun init(otw: SESSIONS_HASH, ctx: &mut TxContext) {
     transfer::public_transfer(cap, tx_context::sender(ctx))
 }
 
-public(package) fun verify<SESSIONS_HASH>(
-    enclave: &Enclave<SESSIONS_HASH>,
-    blob_id_bytes: vector<u8>,
+public(package) fun verify<BLOB_ID>(
+    enclave: &Enclave<BLOB_ID>,
+    blob_id: u256,
     timestamp_ms: u64,
     sig: &vector<u8>,
 ) {
-    let res = enclave::verify_signature<SESSIONS_HASH, vector<u8>>(
+    let res = enclave::verify_signature<BLOB_ID, u256>(
         enclave,
         0, // HashSessions intent
         timestamp_ms,
-        blob_id_bytes,
+        blob_id,
         sig,
     );
     assert!(res, EInvalidSignature);
