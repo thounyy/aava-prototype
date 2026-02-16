@@ -36,7 +36,7 @@ pub struct IntentMessage<T: Serialize> {
 #[derive(Serialize_repr, Deserialize_repr, Debug)]
 #[repr(u8)]
 pub enum IntentScope {
-    HashSessions = 0,
+    EndStream = 0,
 }
 
 impl<T: Serialize + Debug> IntentMessage<T> {

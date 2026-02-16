@@ -127,16 +127,17 @@ async fn end_stream(
 
     // Step 3: Upload data to Walrus using the registered blob_id after Sui tx success
     let blob_id_b64 = URL_SAFE_NO_PAD.encode(data.blob_id.as_ref());
-    let confirmation_certificate = match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
-        Ok(result) => result,
-        Err(e) => {
-            let _ = sui::stream::destroy_blob(&object_id).await;
-            return Err((
-                StatusCode::BAD_GATEWAY,
-                format!("Walrus publish error: {e}"),
-            ));
-        }
-    };
+    let confirmation_certificate =
+        match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
+            Ok(result) => result,
+            Err(e) => {
+                let _ = sui::stream::destroy_blob(&object_id).await;
+                return Err((
+                    StatusCode::BAD_GATEWAY,
+                    format!("Walrus publish error: {e}"),
+                ));
+            }
+        };
 
     info!(
         "Walrus upload succeeded for stream {}: object_id={}, blob_id={}",
@@ -144,7 +145,8 @@ async fn end_stream(
     );
 
     // Step 3b: Certify the blob on Sui using the confirmation certificate (placeholder).
-    sui::stream::certify_and_store_blob(&object_id, &blob_id_b64, &confirmation_certificate).await?;
+    sui::stream::certify_and_store_blob(&object_id, &blob_id_b64, &confirmation_certificate)
+        .await?;
 
     // Step 4: Cleanup stream data from Redis after successful Walrus upload
     enclave::stream::cleanup_dataset(&request.stream_id).await?;

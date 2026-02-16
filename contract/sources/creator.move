@@ -31,6 +31,7 @@ use fun dof::borrow_mut as UID.borrow_mut;
 // === Errors ===
 
 const ENotMember: u64 = 0;
+const EStreamNotActive: u64 = 1;
 
 // === Structs ===
 
@@ -106,12 +107,15 @@ public fun end_stream(
     write_payment: &mut Coin<WAL>,
     ctx: &mut TxContext,
 ) {
+    assert!(account.is_member(ctx.sender()), ENotMember);
     // verify the blob_id bytes from the enclave
-    sessions_hash::verify(enclave, blob_id, timestamp_ms, sig);
+    blob_id::verify(enclave, blob_id, timestamp_ms, sig);
 
     let key = StreamKey(stream_id);
     let stream: &mut Stream = account.id.borrow_mut(key);
-    stream.status = "ended";
+
+    assert!(stream.status == "active", EStreamNotActive);
+    stream.status = "stored";
 
     // register the blob
     let blob = system.register_blob(
@@ -125,6 +129,20 @@ public fun end_stream(
         ctx,
     );
     option::fill(&mut stream.blob, blob);
+}
+
+public fun flag_stream_as_invalid(
+    account: &mut Account,
+    stream_id: ID,
+    ctx: &mut TxContext,
+) {
+    assert!(account.is_member(ctx.sender()), ENotMember);
+
+    let key = StreamKey(stream_id);
+    let stream: &mut Stream = account.id.borrow_mut(key);
+
+    assert!(stream.status == "active", EStreamNotActive);
+    stream.status = "invalid";
 }
 
 // === View functions ===

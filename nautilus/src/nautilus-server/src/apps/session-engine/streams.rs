@@ -166,7 +166,7 @@ pub async fn end_stream(
         &state.eph_kp,
         response_data,
         timestamp_ms,
-        IntentScope::HashSessions,
+        IntentScope::EndStream,
     );
 
     info!(
@@ -237,14 +237,14 @@ pub async fn cleanup_stream(
     })))
 }
 
-struct WalrusMetadataBytes {
+struct WalrusMetadata {
     blob_id: Vec<u8>,
     root_hash: Vec<u8>,
     size: u64,
     encoding_type: u8,
 }
 
-fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadataBytes, anyhow::Error> {
+fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error> {
     let n_shards = std::env::var("WALRUS_N_SHARDS")
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
@@ -256,7 +256,7 @@ fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadataBytes, anyhow::E
     let metadata = config.compute_metadata(blob)?;
     let root_hash = metadata.metadata().compute_root_hash();
 
-    Ok(WalrusMetadataBytes {
+    Ok(WalrusMetadata {
         blob_id: metadata.blob_id().as_ref().to_vec(),
         root_hash: root_hash.bytes().to_vec(),
         size: metadata.metadata().unencoded_length(),
