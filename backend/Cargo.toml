@@ -18,6 +18,12 @@ reqwest = { version = "0.13", features = ["json"] }
 serde_bytes = "0.11"
 base64 = "0.22"
 
+move-binding-derive = { git = "https://github.com/thounyy/move-binding" }
+move-types = { git = "https://github.com/thounyy/move-binding" }
+sui-graphql = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-graphql", rev="e59f01e" }
+sui-sdk-types = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-sdk-types", rev="e59f01e", features = ["serde"] }
+sui-transaction-builder = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-transaction-builder", rev="e59f01e" }
+
 
 
 

@@ -3,6 +3,12 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use tracing::{info, warn};
 
+pub async fn create_stream_object(account_id: &str) -> Result<String, (StatusCode, String)> {
+    warn!("[PLACEHOLDER] Creating stream object {} on Sui", account_id);
+    // TODO: Real Sui call to create the stream object.
+    Ok("object_id".to_string())
+}
+
 /// Verify the enclave signature and register the blob on Sui in a single transaction.
 ///
 /// TODO: Replace this placeholder with a real Sui Move call that:
