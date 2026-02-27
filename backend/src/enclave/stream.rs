@@ -1,8 +1,11 @@
+use std::num::NonZeroU16;
+
 use axum::http::StatusCode;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use tracing::{error, info};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use walrus_core::EncodingType;
 
 // Enclave response types for deserializing the signed session data
 #[derive(Debug, Deserialize)]
@@ -25,8 +28,9 @@ pub struct EnclaveStreamData {
     pub sessions_count: u64,
     pub blob_id: ByteBuf,
     pub root_hash: ByteBuf,
-    pub size: u64,
-    pub encoding_type: u8,
+    pub n_shards: NonZeroU16,
+    pub unencoded_size: u64,
+    pub encoding_type: EncodingType,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -10,13 +10,13 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use std::num::NonZeroU16;
-use walrus_core::{
-    EncodingType,
-    encoding::{EncodingConfig, EncodingFactory},
-    metadata::BlobMetadataApi,
-};
 use std::sync::Arc;
 use tracing::{error, info, warn};
+use walrus_core::{
+    encoding::{EncodingConfig, EncodingFactory},
+    metadata::BlobMetadataApi,
+    EncodingType,
+};
 
 /// Request payload for ending a stream
 #[derive(Debug, Serialize, Deserialize)]
@@ -33,8 +33,9 @@ pub struct EndStreamResponse {
     pub sessions_count: u64,
     pub blob_id: ByteBuf,
     pub root_hash: ByteBuf,
-    pub size: u64,
-    pub encoding_type: u8,
+    pub n_shards: NonZeroU16,
+    pub unencoded_size: u64,
+    pub encoding_type: EncodingType,
 }
 
 /// Request payload for cleaning up sessions after Walrus upload
@@ -122,10 +123,7 @@ pub async fn end_stream(
                     .as_str()
                     .unwrap_or(&request.stream_id)
                     .to_string(),
-                status: session_value["status"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                status: session_value["status"].as_str().unwrap_or("").to_string(),
                 created_at: session_value["created_at"]
                     .as_str()
                     .unwrap_or("")
@@ -152,7 +150,8 @@ pub async fn end_stream(
         sessions_count,
         blob_id: ByteBuf::from(walrus_metadata.blob_id),
         root_hash: ByteBuf::from(walrus_metadata.root_hash),
-        size: walrus_metadata.size,
+        n_shards: walrus_metadata.n_shards,
+        unencoded_size: walrus_metadata.unencoded_size,
         encoding_type: walrus_metadata.encoding_type,
     };
 
@@ -240,8 +239,9 @@ pub async fn cleanup_stream(
 struct WalrusMetadata {
     blob_id: Vec<u8>,
     root_hash: Vec<u8>,
-    size: u64,
-    encoding_type: u8,
+    n_shards: NonZeroU16,
+    unencoded_size: u64,
+    encoding_type: EncodingType,
 }
 
 fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error> {
@@ -249,8 +249,8 @@ fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error>
         .ok()
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(31);
-    let n_shards = NonZeroU16::new(n_shards)
-        .ok_or_else(|| anyhow::anyhow!("WALRUS_N_SHARDS must be > 0"))?;
+    let n_shards =
+        NonZeroU16::new(n_shards).ok_or_else(|| anyhow::anyhow!("WALRUS_N_SHARDS must be > 0"))?;
 
     let config = EncodingConfig::new(n_shards).get_for_type(EncodingType::RS2);
     let metadata = config.compute_metadata(blob)?;
@@ -259,7 +259,8 @@ fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error>
     Ok(WalrusMetadata {
         blob_id: metadata.blob_id().as_ref().to_vec(),
         root_hash: root_hash.bytes().to_vec(),
-        size: metadata.metadata().unencoded_length(),
-        encoding_type: metadata.metadata().encoding_type().into(),
+        n_shards: metadata.n_shards(),
+        unencoded_size: metadata.metadata().unencoded_length(),
+        encoding_type: metadata.metadata().encoding_type(),
     })
 }

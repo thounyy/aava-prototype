@@ -1,8 +1,7 @@
-use serde::{Deserialize, Serialize};
 use crate::walrus::error::WalrusError;
+use serde::{Deserialize, Serialize};
 
 const DEFAULT_UPLOAD_RELAY_URL: &str = "https://upload-relay.testnet.walrus.space";
-
 
 /// Represents a Blob object in the Walrus API.
 #[derive(Debug, Serialize, Deserialize)]

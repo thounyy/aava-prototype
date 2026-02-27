@@ -1,30 +1,66 @@
 use axum::http::StatusCode;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine as _;
+use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
+use sui_crypto::ed25519::Ed25519PrivateKey;
+use sui_rpc::Client;
+use sui_sdk_types::Address;
+use sui_transaction_builder::{Function, ObjectInput};
 use tracing::{info, warn};
 
-pub async fn create_stream_object(account_id: &str) -> Result<String, (StatusCode, String)> {
-    warn!("[PLACEHOLDER] Creating stream object {} on Sui", account_id);
-    // TODO: Real Sui call to create the stream object.
-    Ok("object_id".to_string())
+use crate::{
+    build_and_execute_tx,
+    sui::constants::{ENCLAVE_CONFIG, PACKAGE, WALRUS_SYSTEM},
+};
+
+pub async fn create_stream_object(
+    client: &mut Client,
+    pk: &Ed25519PrivateKey,
+    account_id: Address,
+) -> Result<(), StatusCode> {
+    info!("Creating stream object {} on Sui", account_id);
+
+    let response = build_and_execute_tx!(client, pk, |builder| {
+        let account_arg = builder.object(ObjectInput::new(account_id));
+        builder.move_call(
+            Function::new(
+                PACKAGE.parse().unwrap(),
+                "creator".parse().unwrap(),
+                "start_stream".parse().unwrap(),
+            ),
+            vec![account_arg],
+        );
+    })?;
+
+    let execution_status = response.transaction().effects().status();
+    if !execution_status.success() {
+        warn!("Sui transaction failed while creating stream object: {execution_status:?}");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    Ok(())
 }
 
 /// Verify the enclave signature and register the blob on Sui in a single transaction.
-///
-/// TODO: Replace this placeholder with a real Sui Move call that:
-/// - verifies the nautilus signature
-/// - registers the Walrus blob (or returns the blob/object IDs)
-/// - attaches the object to the streamer account
 pub async fn verify_and_register_blob(
+    client: &mut Client,
+    pk: &Ed25519PrivateKey,
+    account_id: Address,
+    payment_amount: u64,
     stream_id: &str,
-    blob_id: &[u8],
-    root_hash: &[u8],
-    size: u64,
-    encoding_type: u8,
-    deletable: bool,
     timestamp_ms: u64,
     signature: &str,
+    blob_id: &[u8],
+    root_hash: &[u8],
+    unencoded_size: u64,
+    encoding_type: u8,
+    encoded_size: u64,
+    deletable: bool,
 ) -> Result<String, (StatusCode, String)> {
+    info!(
+        "Verifying signature + registering blob on Sui for stream {} (blob_id: {}, sig: {})",
+        stream_id,
+        URL_SAFE_NO_PAD.encode(blob_id),
+        &signature[..signature.len().min(16)]
+    );
     if blob_id.len() != 32 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -44,63 +80,102 @@ pub async fn verify_and_register_blob(
         ));
     }
 
-    info!(
-        "[PLACEHOLDER] Verifying signature + registering blob on Sui for stream {} (blob_id: {}, sig: {})",
-        stream_id,
-        URL_SAFE_NO_PAD.encode(blob_id),
-        &signature[..signature.len().min(16)]
-    );
+    let stream_id_addr: Address = stream_id.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid stream_id `{stream_id}` for Move `ID`: {e}"),
+        )
+    })?;
+    let signature_bytes = URL_SAFE_NO_PAD.decode(signature).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid signature encoding, expected base64url: {e}"),
+        )
+    })?;
 
-    let object_id = call_creator_end_stream(
-        stream_id,
-        blob_id,
-        root_hash,
-        size,
-        encoding_type,
-        deletable,
-        timestamp_ms,
-        signature,
-    )
-    .await?;
+    // Move `u256` is BCS-encoded as 32 little-endian bytes.
+    // Walrus/enclave blob/root hashes are handled as 32-byte big-endian digests.
+    let mut blob_id_u256_le = [0u8; 32];
+    blob_id_u256_le.copy_from_slice(blob_id);
+    blob_id_u256_le.reverse();
 
-    Ok(object_id)
-}
+    let mut root_hash_u256_le = [0u8; 32];
+    root_hash_u256_le.copy_from_slice(root_hash);
+    root_hash_u256_le.reverse();
 
-async fn call_creator_end_stream(
-    stream_id: &str,
-    blob_id: &[u8],
-    root_hash: &[u8],
-    size: u64,
-    encoding_type: u8,
-    deletable: bool,
-    timestamp_ms: u64,
-    signature: &str,
-) -> Result<String, (StatusCode, String)> {
-    warn!(
-        "[PLACEHOLDER] Calling aava::creator::end_stream on Sui for stream {}",
-        stream_id
-    );
-    // TODO: Real Sui transaction submission.
-    // Required Move args (from creator.move):
-    // - account, enclave, system, storage
-    // - stream_id
-    // - blob_id
-    // - timestamp_ms
-    // - signature
-    // - blob_id (u256), root_hash (u256), size (u64), encoding_type (u8), deletable (bool)
-    // - write_payment (Coin<WAL>)
-    // - ctx
-    let _ = (
-        blob_id,
-        root_hash,
-        size,
-        encoding_type,
-        deletable,
-        timestamp_ms,
-        signature,
-    );
+    let payment_coin = todo!();
 
-    Ok("object_id".to_string())
+    let response = build_and_execute_tx!(client, pk, |builder| {
+        let account_arg = builder.object(ObjectInput::new(account_id));
+        let enclave_arg = builder.object(ObjectInput::new(ENCLAVE_CONFIG.parse().unwrap()));
+        let system_arg = builder.object(ObjectInput::new(WALRUS_SYSTEM.parse().unwrap()));
+        let payment_arg = builder.object(ObjectInput::new(payment_coin));
+        let stream_id_arg = builder.pure(&stream_id_addr);
+        let timestamp_arg = builder.pure(&timestamp_ms);
+        let signature_arg = builder.pure(&signature_bytes);
+        let blob_id_arg = builder.pure_bytes(blob_id_u256_le.to_vec());
+        let root_hash_arg = builder.pure_bytes(root_hash_u256_le.to_vec());
+        let unencoded_size_arg = builder.pure(&unencoded_size);
+        let encoded_size_arg = builder.pure(&encoded_size);
+        let encoding_type_arg = builder.pure(&encoding_type);
+        let deletable_arg = builder.pure(&deletable);
+
+        builder.move_call(
+            Function::new(
+                PACKAGE.parse().unwrap(),
+                "creator".parse().unwrap(),
+                "end_stream".parse().unwrap(),
+            ),
+            vec![
+                account_arg,
+                enclave_arg,
+                system_arg,
+                payment_arg,
+                stream_id_arg,
+                timestamp_arg,
+                signature_arg,
+                blob_id_arg,
+                root_hash_arg,
+                unencoded_size_arg,
+                encoding_type_arg,
+                encoded_size_arg,
+                deletable_arg,
+            ],
+        );
+    })
+    .map_err(|status| {
+        (
+            status,
+            "Failed to execute Sui transaction while verifying/registering blob".to_string(),
+        )
+    })?;
+
+    let execution_status = response.transaction().effects().status();
+    if !response.transaction().effects().status().success() {
+        warn!("Sui transaction failed while verifying/registering blob: {execution_status:?}");
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Sui transaction execution failed while verifying/registering blob".to_string(),
+        ));
+    }
+
+    let blob_object_id = response
+        .transaction()
+        .effects()
+        .changed_objects()
+        .to_vec()
+        .iter()
+        .find(|obj| obj.object_type().contains("Blob"))
+        .map(|obj| obj.object_id().to_string())
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "No changed object with type containing `Blob` found in transaction response"
+                    .to_string(),
+            )
+        })?;
+
+    Ok(blob_object_id)
 }
 
 /// Certify a blob on Sui after receiving a confirmation certificate from the upload relay.

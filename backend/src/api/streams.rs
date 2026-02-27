@@ -2,10 +2,19 @@ use axum::{http::StatusCode, response::Json, routing::post, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
+use walrus_core::encoding;
 
 use crate::enclave;
 use crate::sui;
 use crate::walrus;
+
+// From walrus-sui
+// Keep in sync with the same constant in `contracts/walrus/sources/system/system_state_inner.move`.
+// The storage unit is used in doc comments for CLI arguments in the files
+// `crates/walrus-service/bin/deploy.rs` and `crates/walrus-service/bin/node.rs`.
+// Change the unit there if it changes.
+/// The number of bytes per storage unit.
+pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024; // 1 MiB
 
 pub fn create_router() -> Router {
     Router::new()
@@ -84,7 +93,7 @@ async fn end_stream(
             sessions_count: 0,
         }));
     }
-
+    
     // Step 2: Verify signature + register blob on Sui (atomic tx)
     let payload = serde_json::to_vec(&data).map_err(|e| {
         (
@@ -93,15 +102,37 @@ async fn end_stream(
         )
     })?;
 
-    let object_id = match sui::stream::verify_and_register_blob(
-        &request.stream_id,
-        &data.blob_id,
-        &data.root_hash,
-        data.size,
+    let encoded_size = encoding::encoded_blob_length_for_n_shards(
+        data.n_shards,
+        data.unencoded_size,
         data.encoding_type,
-        true,
+    )
+    .ok_or_else(|| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Cannot compute Walrus encoded size".to_string(),
+        )
+    })?;
+
+    let price_per_unit_size = 1; // TODO: fetch price from system object
+
+    let price_for_encoded_length =
+        encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * price_per_unit_size * 53u64;
+
+    let object_id = match sui::stream::verify_and_register_blob(
+        client,
+        pk,
+        account_id,
+        price_for_encoded_length,
+        &request.stream_id,
         timestamp_ms,
         &signature,
+        &data.blob_id,
+        &data.root_hash,
+        data.unencoded_size,
+        data.encoding_type.into(),
+        encoded_size,
+        true,
     )
     .await
     {
