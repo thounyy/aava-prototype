@@ -1,12 +1,17 @@
-use axum::{http::StatusCode, response::Json, routing::post, Router};
+use std::sync::Arc;
+
+use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
+use sui_crypto::ed25519::Ed25519PrivateKey;
+use sui_sdk_types::Address;
 use tracing::{error, info, warn};
 use walrus_core::encoding;
 
 use crate::enclave;
 use crate::sui;
 use crate::walrus;
+use crate::AppState;
 
 // From walrus-sui
 // Keep in sync with the same constant in `contracts/walrus/sources/system/system_state_inner.move`.
@@ -16,7 +21,7 @@ use crate::walrus;
 /// The number of bytes per storage unit.
 pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024; // 1 MiB
 
-pub fn create_router() -> Router {
+pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/streams/start", post(start_stream))
         .route("/api/streams/end", post(end_stream))
@@ -35,6 +40,7 @@ pub struct StreamStartResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamEndRequest {
     pub stream_id: String,
+    pub account_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +81,7 @@ async fn start_stream(
 /// 3. Publishes hash to Sui blockchain
 /// 4. Cleans up sessions from Redis after successful upload
 async fn end_stream(
+    State(state): State<Arc<AppState>>,
     Json(request): Json<StreamEndRequest>,
 ) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
     info!(
@@ -118,10 +125,18 @@ async fn end_stream(
 
     let price_for_encoded_length =
         encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * price_per_unit_size * 53u64;
+    let account_id: Address = request.account_id.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid account_id `{}`: {e}", request.account_id),
+        )
+    })?;
+    let pk = load_sui_private_key_from_env()?;
+    let mut client = state.sui_client.clone();
 
     let object_id = match sui::stream::verify_and_register_blob(
-        client,
-        pk,
+        &mut client,
+        &pk,
         account_id,
         price_for_encoded_length,
         &request.stream_id,

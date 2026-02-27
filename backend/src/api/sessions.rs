@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{http::StatusCode, response::Json, routing::post, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -5,7 +7,9 @@ use std::env;
 use tracing::{error, info};
 use uuid::Uuid;
 
-pub fn create_router() -> Router {
+use crate::AppState;
+
+pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/sessions/open", post(open_session))
         .route("/api/sessions/close", post(close_session))

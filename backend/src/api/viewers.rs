@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use axum::{http::StatusCode, response::Json, routing::post, Router};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
-pub fn create_router() -> Router {
+use crate::AppState;
+
+pub fn create_router() -> Router<Arc<AppState>> {
     Router::new().route("/api/viewers/account/create", post(create_account))
     // .route("/api/account/get", get(get_account))
     // .route("/api/account/exists", get(account_exists))
