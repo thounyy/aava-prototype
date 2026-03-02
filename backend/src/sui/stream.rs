@@ -1,16 +1,16 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use axum::http::StatusCode;
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use sui_crypto::ed25519::Ed25519PrivateKey;
 use sui_rpc::Client;
-use sui_sdk_types::{Address, Transaction};
-use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder};
+use sui_sdk_types::{Address, StructTag, Transaction};
+use sui_transaction_builder::{intent::CoinWithBalance, Function, ObjectInput, TransactionBuilder};
 use tracing::{info, warn};
 
 use crate::{
     build_and_execute_tx,
-    sui::constants::{ENCLAVE_CONFIG, PACKAGE, WALRUS_SYSTEM},
+    sui::constants::{ENCLAVE_CONFIG, PACKAGE, WALRUS_SYSTEM, WAL_COIN_TYPE},
 };
 
 pub async fn create_stream_object(
@@ -100,12 +100,13 @@ pub async fn build_end_stream_tx(
     root_hash_u256_le.copy_from_slice(root_hash);
     root_hash_u256_le.reverse();
 
-    let payment_coin = todo!();
+    let wal_struct_tag = StructTag::from_str(WAL_COIN_TYPE).unwrap();
+    let coin_with_balance = CoinWithBalance::new(wal_struct_tag, payment_amount);
 
     let account_arg = builder.object(ObjectInput::new(account_id));
     let enclave_arg = builder.object(ObjectInput::new(ENCLAVE_CONFIG.parse().unwrap()));
     let system_arg = builder.object(ObjectInput::new(WALRUS_SYSTEM.parse().unwrap()));
-    let payment_arg = builder.object(payment_coin);
+    let payment_arg = builder.intent(coin_with_balance);
     let stream_id_arg = builder.pure(&stream_id_addr);
     let timestamp_arg = builder.pure(&timestamp_ms);
     let signature_arg = builder.pure(&signature_bytes);
