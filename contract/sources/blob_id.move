@@ -4,10 +4,6 @@ module aava::blob_id;
 
 use enclave::enclave::{Self, Enclave};
 
-// === Errors ===
-
-const EInvalidSignature: u64 = 1;
-
 // === Structs ===
 
 public struct BLOB_ID has drop {}
@@ -33,13 +29,12 @@ public(package) fun verify<BLOB_ID>(
     blob_id: u256,
     timestamp_ms: u64,
     sig: &vector<u8>,
-) {
-    let res = enclave::verify_signature<BLOB_ID, u256>(
+): bool {
+    enclave::verify_signature<BLOB_ID, u256>(
         enclave,
         0, // HashSessions intent
         timestamp_ms,
         blob_id,
         sig,
-    );
-    assert!(res, EInvalidSignature);
+    )
 }

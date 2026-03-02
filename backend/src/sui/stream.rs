@@ -56,6 +56,7 @@ pub async fn build_end_stream_tx(
     encoded_size: u64,
     deletable: bool,
 ) -> Result<Transaction, (StatusCode, String)> {
+    let mut client = client.as_ref().clone();
     if blob_id.len() != 32 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -169,14 +170,5 @@ pub async fn destroy_blob(object_id: &str) -> Result<(), (StatusCode, String)> {
         object_id
     );
     // TODO: Real Sui delete call for deletable blobs.
-    Ok(())
-}
-
-pub async fn flag_stream_as_invalid(stream_id: &str) -> Result<(), (StatusCode, String)> {
-    warn!(
-        "[PLACEHOLDER] Flagging stream {} as invalid on Sui",
-        stream_id
-    );
-    // TODO: Real Sui call to mark the stream as invalid.
     Ok(())
 }

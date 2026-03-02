@@ -104,50 +104,38 @@ public fun end_stream(
     ctx: &mut TxContext,
 ) {
     assert!(account.is_member(ctx.sender()), ENotMember);
+
+    let key = StreamKey(stream_id);
+    let stream: &mut Stream = account.id.borrow_mut(key);
+    assert!(stream.status == "active", EStreamNotActive);
+
     // verify the blob_id bytes from the enclave
-    blob_id::verify(enclave, blob_id, timestamp_ms, sig);
+    if (blob_id::verify(enclave, blob_id, timestamp_ms, sig)) {
+        // reserve storage space
+        let storage = system.reserve_space(
+            encoded_size, 
+            53, 
+            payment,
+            ctx
+        );
 
-    let key = StreamKey(stream_id);
-    let stream: &mut Stream = account.id.borrow_mut(key);
-
-    assert!(stream.status == "active", EStreamNotActive);
-    stream.status = "stored";
-
-    // reserve storage space
-    let storage = system.reserve_space(
-        encoded_size, 
-        53, 
-        payment,
-        ctx
-    );
-
-    // register the blob
-    let blob = system.register_blob(
-        storage,
-        blob_id,
-        root_hash,
-        unencoded_size,
-        encoding_type,
-        deletable,
-        payment,
-        ctx,
-    );
-    
-    stream.id.add(BlobKey(), blob);
-}
-
-public fun flag_stream_as_invalid(
-    account: &mut Account,
-    stream_id: ID,
-    ctx: &mut TxContext,
-) {
-    assert!(account.is_member(ctx.sender()), ENotMember);
-
-    let key = StreamKey(stream_id);
-    let stream: &mut Stream = account.id.borrow_mut(key);
-
-    assert!(stream.status == "active", EStreamNotActive);
-    stream.status = "invalid";
+        // register the blob
+        let blob = system.register_blob(
+            storage,
+            blob_id,
+            root_hash,
+            unencoded_size,
+            encoding_type,
+            deletable,
+            payment,
+            ctx,
+        );
+        
+        stream.id.add(BlobKey(), blob);
+        stream.status = "stored";
+    } else {
+        stream.status = "invalid";
+    }
 }
 
 // === View functions ===

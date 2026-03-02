@@ -5,6 +5,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
+use sui_rpc::Client;
 use sui_sdk_types::Address;
 use tracing::{info, warn};
 use walrus_core::encoding;
@@ -160,27 +161,22 @@ async fn end_stream(
         true,
     )
     .await?;
-    let tx_digest = tx.digest().to_string();
+    let tx_digest = tx.digest().to_string().clone();
     let tx_bytes_b64 = URL_SAFE_NO_PAD.encode(bcs::to_bytes(&tx).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to serialize tx bytes: {e}"),
         )
     })?);
-
-    //     // TODO: Store flawed stream data in Postgres for quarantine/audit.
-    // let _ = sui::stream::flag_stream_as_invalid(&request.stream_id).await;
-
-    let watcher_client = state.sui_client.clone();
+    
     let watcher_tx_digest = tx_digest.clone();
     let watcher_stream_id = request.stream_id.clone();
-    let watcher_blob_id_b64 = URL_SAFE_NO_PAD.encode(data.blob_id.as_ref());
     tokio::spawn(async move {
-        watch_stream_end_transaction(
-            watcher_client,
+        watch_end_stream_tx(
+            state.sui_client.clone(),
             watcher_tx_digest,
             watcher_stream_id,
-            watcher_blob_id_b64,
+            URL_SAFE_NO_PAD.encode(&data.blob_id),
             payload,
         )
         .await;
@@ -188,7 +184,7 @@ async fn end_stream(
 
     info!(
         "Prepared stream end tx for stream {}: tx_digest={}",
-        request.stream_id, tx_digest
+        request.stream_id.clone(), tx_digest.clone()
     );
 
     Ok(Json(StreamEndResponse {
@@ -199,13 +195,14 @@ async fn end_stream(
     }))
 }
 
-async fn watch_stream_end_transaction(
-    mut client: sui_rpc::Client,
+async fn watch_end_stream_tx(
+    client: Arc<Client>,
     tx_digest: String,
     stream_id: String,
     blob_id_b64: String,
     payload: Vec<u8>,
 ) {
+    let mut client = client.as_ref().clone();
     info!(
         "Watching transaction {} for stream {}",
         tx_digest, stream_id
@@ -229,8 +226,7 @@ async fn watch_stream_end_transaction(
                         "Transaction {} failed for stream {}: {:?}",
                         tx_digest, stream_id, status
                     );
-                    let _ = sui::stream::flag_stream_as_invalid(&stream_id).await;
-                    return;
+                    return; // TODO: handle failed transaction
                 }
 
                 let object_id = tx
@@ -244,8 +240,7 @@ async fn watch_stream_end_transaction(
                         "Transaction {} succeeded but no Blob object found for stream {}",
                         tx_digest, stream_id
                     );
-                    let _ = sui::stream::flag_stream_as_invalid(&stream_id).await;
-                    return;
+                    return; // TODO: handle object id not found
                 };
 
                 match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
