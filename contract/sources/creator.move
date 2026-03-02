@@ -28,6 +28,14 @@ use fun dof::borrow_mut as UID.borrow_mut;
 
 const ENotMember: u64 = 0;
 const EStreamNotActive: u64 = 1;
+const EStreamNotVerified: u64 = 2;
+
+// === Constants ===
+
+const INVALID: u8 = 0; // blob_id verification or walrus storage failed
+const ACTIVE: u8 = 1; // stream is active
+const VERIFIED: u8 = 2; // blob_id verified
+const STORED: u8 = 3; // blob stored on walrus
 
 // === Structs ===
 
@@ -44,8 +52,8 @@ public struct StreamKey(ID) has copy, drop, store;
 
 public struct Stream has key, store {
     id: UID,
-    // active, stored, invalid
-    status: String,
+    // active > verified > stored | invalid
+    status: u8,
     // df(Blob) if none, sessions dataset is not stored on walrus
 }
 
@@ -71,7 +79,7 @@ public fun new_account(
     transfer::share_object(account);
 }
 
-public fun start_stream(
+public fun create_stream(
     account: &mut Account,
     ctx: &mut TxContext,
 ) {
@@ -81,20 +89,20 @@ public fun start_stream(
     let key = StreamKey(id.to_inner());
     let stream = Stream {
         id,
-        status: "active",
+        status: ACTIVE,
     };
     
     account.id.add(key, stream);
 }
 
-public fun end_stream(
+public fun verify_and_store_blob(
     account: &mut Account,
     enclave: &Enclave<BLOB_ID>,
     system: &mut System,
     payment: &mut Coin<WAL>,
     stream_id: ID,
     timestamp_ms: u64,
-    sig: &vector<u8>,
+    signature: &vector<u8>,
     blob_id: u256,
     root_hash: u256,
     unencoded_size: u64,
@@ -107,10 +115,10 @@ public fun end_stream(
 
     let key = StreamKey(stream_id);
     let stream: &mut Stream = account.id.borrow_mut(key);
-    assert!(stream.status == "active", EStreamNotActive);
+    assert!(stream.status == ACTIVE, EStreamNotActive);
 
     // verify the blob_id bytes from the enclave
-    if (blob_id::verify(enclave, blob_id, timestamp_ms, sig)) {
+    if (blob_id::verify(enclave, blob_id, timestamp_ms, signature)) {
         // reserve storage space
         let storage = system.reserve_space(
             encoded_size, 
@@ -132,10 +140,31 @@ public fun end_stream(
         );
         
         stream.id.add(BlobKey(), blob);
-        stream.status = "stored";
+        stream.status = VERIFIED;
     } else {
-        stream.status = "invalid";
+        stream.status = INVALID;
     }
+}
+
+public fun certify_blob(
+    account: &mut Account,
+    system: &mut System,
+    stream_id: ID,
+    signature: vector<u8>,
+    signers_bitmap: vector<u8>,
+    message: vector<u8>,
+    ctx: &mut TxContext,
+) {
+    assert!(account.is_member(ctx.sender()), ENotMember);
+
+    let key = StreamKey(stream_id);
+    let stream: &mut Stream = account.id.borrow_mut(key);
+    assert!(stream.status == VERIFIED, EStreamNotVerified);
+
+    let blob = stream.id.borrow_mut(BlobKey());
+
+    system.certify_blob(blob, signature, signers_bitmap, message);
+    stream.status = STORED;
 }
 
 // === View functions ===

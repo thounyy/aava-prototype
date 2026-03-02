@@ -7,13 +7,14 @@ use sui_rpc::Client;
 use sui_sdk_types::{Address, StructTag, Transaction};
 use sui_transaction_builder::{intent::CoinWithBalance, Function, ObjectInput, TransactionBuilder};
 use tracing::{info, warn};
+use walrus_core::messages::ConfirmationCertificate;
 
 use crate::{
     build_and_execute_tx,
     sui::constants::{ENCLAVE_CONFIG, PACKAGE, WALRUS_SYSTEM, WAL_COIN_TYPE},
 };
 
-pub async fn create_stream_object(
+pub async fn build_create_stream_tx(
     client: &mut Client,
     pk: &Ed25519PrivateKey,
     account_id: Address,
@@ -41,7 +42,7 @@ pub async fn create_stream_object(
     Ok(())
 }
 
-pub async fn build_end_stream_tx(
+pub async fn build_verify_and_store_blob_tx(
     client: Arc<Client>,
     sender: Address,
     account_id: Address,
@@ -150,18 +151,73 @@ pub async fn build_end_stream_tx(
 
 /// Certify a blob on Sui after receiving a confirmation certificate from the upload relay.
 /// and add it to the streamer's account.
-pub async fn certify_and_store_blob(
-    object_id: &str,
-    blob_id: &str,
-    confirmation_certificate: &serde_json::Value,
-) -> Result<(), (StatusCode, String)> {
-    warn!(
-        "[PLACEHOLDER] Certifying blob {} (obj_id: {}) on Sui with confirmation certificate",
-        object_id, blob_id
+pub async fn build_certify_blob_tx(
+    client: Arc<Client>,
+    sender: Address,
+    account_id: Address,
+    stream_id: &str,
+    confirmation_certificate: &ConfirmationCertificate,
+) -> Result<Transaction, (StatusCode, String)> {
+    let mut client = client.as_ref().clone();
+
+    let stream_id_addr: Address = stream_id.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid stream_id `{stream_id}` for Move `ID`: {e}"),
+        )
+    })?;
+    let signature = &confirmation_certificate.signature.as_ref().to_vec();
+    let signers_bitmap = signers_to_bitmap(&confirmation_certificate.signers)?;
+    let message = &confirmation_certificate.serialized_message;
+
+    let mut builder = TransactionBuilder::new();
+    builder.set_sender(sender);
+
+    let account_arg = builder.object(ObjectInput::new(account_id));
+    let system_arg = builder.object(ObjectInput::new(WALRUS_SYSTEM.parse().unwrap()));
+    let stream_id_arg = builder.pure(&stream_id_addr);
+    let signature_arg = builder.pure(signature);
+    let signers_bitmap_arg = builder.pure(&signers_bitmap);
+    let message_arg = builder.pure(message);
+
+    builder.move_call(
+        Function::new(
+            PACKAGE.parse().unwrap(),
+            "creator".parse().unwrap(),
+            "certify_blob".parse().unwrap(),
+        ),
+        vec![
+            account_arg,
+            system_arg,
+            stream_id_arg,
+            signature_arg,
+            signers_bitmap_arg,
+            message_arg,
+        ],
     );
-    // TODO: Real Sui call to certify the blob using the certificate.
-    let _ = confirmation_certificate;
-    Ok(())
+
+    builder.build(&mut client).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to build certify_blob tx: {err}"),
+        )
+    })
+}
+
+fn signers_to_bitmap(signers: &[u16]) -> Result<Vec<u8>, (StatusCode, String)> {
+    let Some(max_signer) = signers.iter().max().copied() else {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "Confirmation certificate has no signers".to_string(),
+        ));
+    };
+    let mut bitmap = vec![0u8; usize::from(max_signer / 8 + 1)];
+    for signer in signers {
+        let byte_index = usize::from(*signer / 8);
+        let bit_index = (*signer % 8) as u8;
+        bitmap[byte_index] |= 1u8 << bit_index;
+    }
+    Ok(bitmap)
 }
 
 /// Cleanup helper for cases where Sui registration succeeded but Walrus upload failed.

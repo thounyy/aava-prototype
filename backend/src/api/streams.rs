@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -145,7 +145,7 @@ async fn end_stream(
         )
     })?;
 
-    let tx = sui::stream::build_end_stream_tx(
+    let tx = sui::stream::build_verify_and_store_blob_tx(
         state.sui_client.clone(),
         sender,
         account_id,
@@ -169,13 +169,18 @@ async fn end_stream(
         )
     })?);
     
+    // Step 3: Watch the transaction and upload the blob to Walrus
     let watcher_tx_digest = tx_digest.clone();
     let watcher_stream_id = request.stream_id.clone();
+    let watcher_sender = sender;
+    let watcher_account_id = account_id;
     tokio::spawn(async move {
         watch_end_stream_tx(
             state.sui_client.clone(),
             watcher_tx_digest,
             watcher_stream_id,
+            watcher_sender,
+            watcher_account_id,
             URL_SAFE_NO_PAD.encode(&data.blob_id),
             payload,
         )
@@ -199,10 +204,11 @@ async fn watch_end_stream_tx(
     client: Arc<Client>,
     tx_digest: String,
     stream_id: String,
+    sender: Address,
+    account_id: Address,
     blob_id_b64: String,
     payload: Vec<u8>,
 ) {
-    let mut client = client.as_ref().clone();
     info!(
         "Watching transaction {} for stream {}",
         tx_digest, stream_id
@@ -212,11 +218,11 @@ async fn watch_end_stream_tx(
         let request = GetTransactionRequest::default()
             .with_digest(&tx_digest)
             .with_read_mask(FieldMask::from_str("*"));
-        match client.ledger_client().get_transaction(request).await {
+        match client.as_ref().clone().ledger_client().get_transaction(request).await {
             Ok(response) => {
                 let tx = response.into_inner().transaction().clone();
                 if tx.checkpoint_opt().is_none() {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    tokio::time::sleep(Duration::from_millis(500)).await;
                     continue;
                 }
 
@@ -244,11 +250,13 @@ async fn watch_end_stream_tx(
                 };
 
                 match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
-                    Ok(confirmation_certificate) => {
-                        let _ = sui::stream::certify_and_store_blob(
-                            &object_id,
-                            &blob_id_b64,
-                            &confirmation_certificate,
+                    Ok(relay_response) => {
+                        let _ = sui::stream::build_certify_blob_tx(
+                            client.clone(),
+                            sender,
+                            account_id,
+                            &stream_id,
+                            &relay_response.confirmation_certificate,
                         )
                         .await;
                         let _ = enclave::stream::cleanup_dataset(&stream_id).await;

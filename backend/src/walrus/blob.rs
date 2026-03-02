@@ -1,5 +1,6 @@
 use crate::walrus::error::WalrusError;
 use serde::{Deserialize, Serialize};
+use walrus_core::{BlobId, messages::ConfirmationCertificate};
 
 const DEFAULT_UPLOAD_RELAY_URL: &str = "https://upload-relay.testnet.walrus.space";
 
@@ -102,11 +103,18 @@ pub enum BlobStoreResult {
     },
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadRelayResponse {
+    pub blob_id: BlobId,
+    pub confirmation_certificate: ConfirmationCertificate,
+}
+
 pub async fn upload_dataset(
     object_id: &str,
     blob_id: &str,
     dataset: Vec<u8>,
-) -> Result<serde_json::Value, WalrusError> {
+) -> Result<UploadRelayResponse, WalrusError> {
     let client = reqwest::Client::new();
     let relay_base_url = std::env::var("WALRUS_UPLOAD_RELAY_URL")
         .unwrap_or_else(|_| DEFAULT_UPLOAD_RELAY_URL.to_string());
@@ -125,9 +133,9 @@ pub async fn upload_dataset(
         return Err(WalrusError::ApiError(status, body));
     }
 
-    let confirmation_certificate: serde_json::Value = response.json().await.map_err(|e| {
-        WalrusError::ParseError(format!("Failed to parse confirmation certificate: {e}"))
+    let relay_response: UploadRelayResponse = response.json().await.map_err(|e| {
+        WalrusError::ParseError(format!("Failed to parse upload relay response: {e}"))
     })?;
 
-    Ok(confirmation_certificate)
+    Ok(relay_response)
 }
