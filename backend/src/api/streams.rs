@@ -1,11 +1,12 @@
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
-use sui_crypto::ed25519::Ed25519PrivateKey;
+use sui_rpc::field::{FieldMask, FieldMaskUtil};
+use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
 use sui_sdk_types::Address;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use walrus_core::encoding;
 
 use crate::enclave;
@@ -41,12 +42,15 @@ pub struct StreamStartResponse {
 pub struct StreamEndRequest {
     pub stream_id: String,
     pub account_id: String,
+    pub sender: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamEndResponse {
     pub stream_id: String,
     pub sessions_count: u64,
+    pub tx_digest: String,
+    pub tx_bytes_b64: String,
 }
 
 /// Start a stream
@@ -98,9 +102,11 @@ async fn end_stream(
         return Ok(Json(StreamEndResponse {
             stream_id: request.stream_id,
             sessions_count: 0,
+            tx_digest: String::new(),
+            tx_bytes_b64: String::new(),
         }));
     }
-    
+
     // Step 2: Verify signature + register blob on Sui (atomic tx)
     let payload = serde_json::to_vec(&data).map_err(|e| {
         (
@@ -131,12 +137,16 @@ async fn end_stream(
             format!("Invalid account_id `{}`: {e}", request.account_id),
         )
     })?;
-    let pk = load_sui_private_key_from_env()?;
-    let mut client = state.sui_client.clone();
+    let sender: Address = request.sender.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid sender `{}`: {e}", request.sender),
+        )
+    })?;
 
-    let object_id = match sui::stream::verify_and_register_blob(
-        &mut client,
-        &pk,
+    let tx = sui::stream::build_end_stream_tx(
+        state.sui_client.clone(),
+        sender,
         account_id,
         price_for_encoded_length,
         &request.stream_id,
@@ -149,62 +159,125 @@ async fn end_stream(
         encoded_size,
         true,
     )
-    .await
-    {
-        Ok(result) => result,
-        Err((status, message)) => {
-            error!(
-                "Sui verification/registration failed for stream {}: {}",
-                request.stream_id, message
-            );
+    .await?;
+    let tx_digest = tx.digest().to_string();
+    let tx_bytes_b64 = URL_SAFE_NO_PAD.encode(bcs::to_bytes(&tx).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize tx bytes: {e}"),
+        )
+    })?);
 
-            // TODO: Store flawed stream data in Postgres for quarantine/audit.
-            let _ = sui::stream::flag_stream_as_invalid(&request.stream_id).await;
+    //     // TODO: Store flawed stream data in Postgres for quarantine/audit.
+    // let _ = sui::stream::flag_stream_as_invalid(&request.stream_id).await;
 
-            return Err((status, message));
-        }
-    };
-    info!(
-        "Sui tx submitted for stream {}: object_id={}, blob_id={}",
-        request.stream_id,
-        object_id,
-        URL_SAFE_NO_PAD.encode(data.blob_id.as_ref())
-    );
-
-    // Step 3: Upload data to Walrus using the registered blob_id after Sui tx success
-    let blob_id_b64 = URL_SAFE_NO_PAD.encode(data.blob_id.as_ref());
-    let confirmation_certificate =
-        match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
-            Ok(result) => result,
-            Err(e) => {
-                let _ = sui::stream::destroy_blob(&object_id).await;
-                return Err((
-                    StatusCode::BAD_GATEWAY,
-                    format!("Walrus publish error: {e}"),
-                ));
-            }
-        };
+    let watcher_client = state.sui_client.clone();
+    let watcher_tx_digest = tx_digest.clone();
+    let watcher_stream_id = request.stream_id.clone();
+    let watcher_blob_id_b64 = URL_SAFE_NO_PAD.encode(data.blob_id.as_ref());
+    tokio::spawn(async move {
+        watch_stream_end_transaction(
+            watcher_client,
+            watcher_tx_digest,
+            watcher_stream_id,
+            watcher_blob_id_b64,
+            payload,
+        )
+        .await;
+    });
 
     info!(
-        "Walrus upload succeeded for stream {}: object_id={}, blob_id={}",
-        request.stream_id, object_id, blob_id_b64
-    );
-
-    // Step 3b: Certify the blob on Sui using the confirmation certificate (placeholder).
-    sui::stream::certify_and_store_blob(&object_id, &blob_id_b64, &confirmation_certificate)
-        .await?;
-
-    // Step 4: Cleanup stream data from Redis after successful Walrus upload
-    enclave::stream::cleanup_dataset(&request.stream_id).await?;
-
-    info!(
-        "Stream {} ended: {} sessions processed, verified+registered on Sui, uploaded+certified on Walrus/Sui, and cleaned up",
-        request.stream_id,
-        data.sessions_count
+        "Prepared stream end tx for stream {}: tx_digest={}",
+        request.stream_id, tx_digest
     );
 
     Ok(Json(StreamEndResponse {
         stream_id: request.stream_id,
         sessions_count: data.sessions_count,
+        tx_digest,
+        tx_bytes_b64,
     }))
+}
+
+async fn watch_stream_end_transaction(
+    mut client: sui_rpc::Client,
+    tx_digest: String,
+    stream_id: String,
+    blob_id_b64: String,
+    payload: Vec<u8>,
+) {
+    info!(
+        "Watching transaction {} for stream {}",
+        tx_digest, stream_id
+    );
+
+    for _ in 0..120 {
+        let request = GetTransactionRequest::default()
+            .with_digest(&tx_digest)
+            .with_read_mask(FieldMask::from_str("*"));
+        match client.ledger_client().get_transaction(request).await {
+            Ok(response) => {
+                let tx = response.into_inner().transaction().clone();
+                if tx.checkpoint_opt().is_none() {
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+
+                let status = tx.effects().status();
+                if !status.success() {
+                    warn!(
+                        "Transaction {} failed for stream {}: {:?}",
+                        tx_digest, stream_id, status
+                    );
+                    let _ = sui::stream::flag_stream_as_invalid(&stream_id).await;
+                    return;
+                }
+
+                let object_id = tx
+                    .effects()
+                    .changed_objects()
+                    .iter()
+                    .find(|obj| obj.object_type().contains("Blob"))
+                    .map(|obj| obj.object_id().to_string());
+                let Some(object_id) = object_id else {
+                    warn!(
+                        "Transaction {} succeeded but no Blob object found for stream {}",
+                        tx_digest, stream_id
+                    );
+                    let _ = sui::stream::flag_stream_as_invalid(&stream_id).await;
+                    return;
+                };
+
+                match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
+                    Ok(confirmation_certificate) => {
+                        let _ = sui::stream::certify_and_store_blob(
+                            &object_id,
+                            &blob_id_b64,
+                            &confirmation_certificate,
+                        )
+                        .await;
+                        let _ = enclave::stream::cleanup_dataset(&stream_id).await;
+                        info!(
+                            "Stream {} finalized (tx={}, object_id={})",
+                            stream_id, tx_digest, object_id
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Walrus upload failed after successful tx {} for stream {}: {}",
+                            tx_digest, stream_id, e
+                        );
+                        let _ = sui::stream::destroy_blob(&object_id).await;
+                    }
+                }
+                return;
+            }
+            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+        }
+    }
+
+    warn!(
+        "Timed out waiting for transaction {} (stream {})",
+        tx_digest, stream_id
+    );
 }
