@@ -5,7 +5,6 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
-use sui_rpc::Client;
 use sui_sdk_types::Address;
 use tracing::{info, warn};
 use walrus_core::encoding;
@@ -26,7 +25,8 @@ pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024; // 1 MiB
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/streams/start", post(start_stream))
-        .route("/api/streams/end", post(end_stream))
+        .route("/api/streams/end/init", post(init_end_stream))
+        .route("/api/streams/end/finalize", post(finalize_end_stream))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,16 +40,36 @@ pub struct StreamStartResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamEndRequest {
+pub struct StreamEndInitRequest {
     pub stream_id: String,
     pub account_id: String,
     pub sender: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamEndResponse {
+pub struct StreamEndInitResponse {
     pub stream_id: String,
     pub sessions_count: u64,
+    pub tx_digest: String,
+    pub tx_bytes_b64: String,
+    pub blob_id_b64: String,
+    pub payload_b64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEndFinalizeRequest {
+    pub stream_id: String,
+    pub account_id: String,
+    pub sender: String,
+    pub end_tx_digest: String,
+    pub blob_id_b64: String,
+    pub payload_b64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEndFinalizeResponse {
+    pub stream_id: String,
+    pub action: String,
     pub tx_digest: String,
     pub tx_bytes_b64: String,
 }
@@ -85,10 +105,10 @@ async fn start_stream(
 /// 2. Publishes attested session data to Walrus (decentralized storage)
 /// 3. Publishes hash to Sui blockchain
 /// 4. Cleans up sessions from Redis after successful upload
-async fn end_stream(
+async fn init_end_stream(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<StreamEndRequest>,
-) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
+    Json(request): Json<StreamEndInitRequest>,
+) -> Result<Json<StreamEndInitResponse>, (StatusCode, String)> {
     info!(
         "Ending stream {} - calling enclave to batch sessions and generate attestation",
         request.stream_id
@@ -100,11 +120,13 @@ async fn end_stream(
 
     if data.sessions_count == 0 {
         warn!("No active sessions found for stream {}", request.stream_id);
-        return Ok(Json(StreamEndResponse {
+        return Ok(Json(StreamEndInitResponse {
             stream_id: request.stream_id,
             sessions_count: 0,
             tx_digest: String::new(),
             tx_bytes_b64: String::new(),
+            blob_id_b64: String::new(),
+            payload_b64: String::new(),
         }));
     }
 
@@ -168,57 +190,64 @@ async fn end_stream(
             format!("Failed to serialize tx bytes: {e}"),
         )
     })?);
-    
-    // Step 3: Watch the transaction and upload the blob to Walrus
-    let watcher_tx_digest = tx_digest.clone();
-    let watcher_stream_id = request.stream_id.clone();
-    let watcher_sender = sender;
-    let watcher_account_id = account_id;
-    tokio::spawn(async move {
-        watch_end_stream_tx(
-            state.sui_client.clone(),
-            watcher_tx_digest,
-            watcher_stream_id,
-            watcher_sender,
-            watcher_account_id,
-            URL_SAFE_NO_PAD.encode(&data.blob_id),
-            payload,
-        )
-        .await;
-    });
 
     info!(
         "Prepared stream end tx for stream {}: tx_digest={}",
-        request.stream_id.clone(), tx_digest.clone()
+        request.stream_id.clone(),
+        tx_digest.clone()
     );
 
-    Ok(Json(StreamEndResponse {
+    Ok(Json(StreamEndInitResponse {
         stream_id: request.stream_id,
         sessions_count: data.sessions_count,
         tx_digest,
         tx_bytes_b64,
+        blob_id_b64: URL_SAFE_NO_PAD.encode(&data.blob_id),
+        payload_b64: URL_SAFE_NO_PAD.encode(payload),
     }))
 }
 
-async fn watch_end_stream_tx(
-    client: Arc<Client>,
-    tx_digest: String,
-    stream_id: String,
-    sender: Address,
-    account_id: Address,
-    blob_id_b64: String,
-    payload: Vec<u8>,
-) {
+async fn finalize_end_stream(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<StreamEndFinalizeRequest>,
+) -> Result<Json<StreamEndFinalizeResponse>, (StatusCode, String)> {
+    let account_id: Address = request.account_id.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid account_id `{}`: {e}", request.account_id),
+        )
+    })?;
+    let sender: Address = request.sender.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid sender `{}`: {e}", request.sender),
+        )
+    })?;
+    let payload = URL_SAFE_NO_PAD.decode(&request.payload_b64).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid payload_b64, expected base64url: {e}"),
+        )
+    })?;
+
     info!(
-        "Watching transaction {} for stream {}",
-        tx_digest, stream_id
+        "Finalizing stream {} from end tx {}",
+        request.end_tx_digest, request.stream_id
     );
 
+    let mut tx_opt = None;
     for _ in 0..120 {
-        let request = GetTransactionRequest::default()
-            .with_digest(&tx_digest)
+        let tx_request = GetTransactionRequest::default()
+            .with_digest(&request.end_tx_digest)
             .with_read_mask(FieldMask::from_str("*"));
-        match client.as_ref().clone().ledger_client().get_transaction(request).await {
+        match state
+            .sui_client
+            .as_ref()
+            .clone()
+            .ledger_client()
+            .get_transaction(tx_request)
+            .await
+        {
             Ok(response) => {
                 let tx = response.into_inner().transaction().clone();
                 if tx.checkpoint_opt().is_none() {
@@ -228,80 +257,91 @@ async fn watch_end_stream_tx(
 
                 let status = tx.effects().status();
                 if !status.success() {
-                    warn!(
-                        "Transaction {} failed for stream {}: {:?}",
-                        tx_digest, stream_id, status
-                    );
-                    return; // TODO: handle failed transaction
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        format!(
+                            "Transaction {} failed for stream {}: {:?}",
+                            request.end_tx_digest, request.stream_id, status
+                        ),
+                    ));
                 }
-
-                let object_id = tx
-                    .effects()
-                    .changed_objects()
-                    .iter()
-                    .find(|obj| obj.object_type().contains("Blob"))
-                    .map(|obj| obj.object_id().to_string());
-                let Some(object_id) = object_id else {
-                    warn!(
-                        "Transaction {} succeeded but no Blob object found for stream {}",
-                        tx_digest, stream_id
-                    );
-                    return; // TODO: handle object id not found
-                };
-
-                match walrus::blob::upload_dataset(&object_id, &blob_id_b64, payload).await {
-                    Ok(relay_response) => {
-                        let _ = sui::stream::build_certify_blob_tx(
-                            client.clone(),
-                            sender,
-                            account_id,
-                            &stream_id,
-                            &relay_response.confirmation_certificate,
-                        )
-                        .await;
-                        let _ = enclave::stream::cleanup_dataset(&stream_id).await;
-                        info!(
-                            "Stream {} finalized (tx={}, object_id={})",
-                            stream_id, tx_digest, object_id
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            "Walrus upload failed after successful tx {} for stream {}: {}",
-                            tx_digest, stream_id, e
-                        );
-                        match sui::stream::build_destroy_blob_tx(
-                            client.clone(),
-                            sender,
-                            account_id,
-                            &stream_id,
-                        )
-                        .await
-                        {
-                            Ok(cleanup_tx) => {
-                                warn!(
-                                    "Built cleanup destroy_blob tx for stream {} (digest={})",
-                                    stream_id,
-                                    cleanup_tx.digest()
-                                );
-                            }
-                            Err(err) => {
-                                warn!(
-                                    "Failed to build cleanup destroy_blob tx for stream {}: {:?}",
-                                    stream_id, err
-                                );
-                            }
-                        }
-                    }
-                }
-                return;
+                tx_opt = Some(tx);
+                break;
             }
-            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+            Err(_) => tokio::time::sleep(Duration::from_millis(500)).await,
         }
     }
+    let tx = tx_opt.ok_or_else(|| {
+        (
+            StatusCode::GATEWAY_TIMEOUT,
+            format!(
+                "Timed out waiting for transaction {} (stream {})",
+                request.end_tx_digest, request.stream_id
+            ),
+        )
+    })?;
 
-    warn!(
-        "Timed out waiting for transaction {} (stream {})",
-        tx_digest, stream_id
-    );
+    let object_id = tx
+        .effects()
+        .changed_objects()
+        .iter()
+        .find(|obj| obj.object_type().contains("Blob"))
+        .map(|obj| obj.object_id().to_string())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_GATEWAY,
+                format!(
+                    "Transaction {} succeeded but no Blob object found for stream {}",
+                    request.end_tx_digest, request.stream_id
+                ),
+            )
+        })?;
+
+    let (finalize_action, finalize_tx) =
+        match walrus::blob::upload_dataset(&object_id, &request.blob_id_b64, payload).await {
+            Ok(relay_response) => {
+                let tx = sui::stream::build_certify_blob_tx(
+                    state.sui_client.clone(),
+                    sender,
+                    account_id,
+                    &request.stream_id,
+                    &relay_response.confirmation_certificate,
+                )
+                .await?;
+                ("certify_blob".to_string(), tx)
+            }
+            Err(e) => {
+                // TODO: keep data in separate db
+                warn!(
+                    "Walrus upload failed after successful tx {} for stream {}: {}",
+                    request.end_tx_digest, request.stream_id, e
+                );
+                let tx = sui::stream::build_destroy_blob_tx(
+                    state.sui_client.clone(),
+                    sender,
+                    account_id,
+                    &request.stream_id,
+                )
+                .await?;
+                ("destroy_blob".to_string(), tx)
+            }
+        };
+
+    // TODO: assess how to handle cleanup in case of failure
+    enclave::stream::cleanup_dataset(&request.stream_id).await?;
+
+    let finalize_tx_digest = finalize_tx.digest().to_string();
+    let finalize_tx_bytes_b64 = URL_SAFE_NO_PAD.encode(bcs::to_bytes(&finalize_tx).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize finalize tx bytes: {e}"),
+        )
+    })?);
+
+    Ok(Json(StreamEndFinalizeResponse {
+        stream_id: request.stream_id,
+        action: finalize_action,
+        tx_digest: finalize_tx_digest,
+        tx_bytes_b64: finalize_tx_bytes_b64,
+    }))
 }
