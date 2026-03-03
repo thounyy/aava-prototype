@@ -270,7 +270,28 @@ async fn watch_end_stream_tx(
                             "Walrus upload failed after successful tx {} for stream {}: {}",
                             tx_digest, stream_id, e
                         );
-                        let _ = sui::stream::destroy_blob(&object_id).await;
+                        match sui::stream::build_destroy_blob_tx(
+                            client.clone(),
+                            sender,
+                            account_id,
+                            &stream_id,
+                        )
+                        .await
+                        {
+                            Ok(cleanup_tx) => {
+                                warn!(
+                                    "Built cleanup destroy_blob tx for stream {} (digest={})",
+                                    stream_id,
+                                    cleanup_tx.digest()
+                                );
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "Failed to build cleanup destroy_blob tx for stream {}: {:?}",
+                                    stream_id, err
+                                );
+                            }
+                        }
                     }
                 }
                 return;

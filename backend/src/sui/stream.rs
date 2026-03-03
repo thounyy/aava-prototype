@@ -221,11 +221,38 @@ fn signers_to_bitmap(signers: &[u16]) -> Result<Vec<u8>, (StatusCode, String)> {
 }
 
 /// Cleanup helper for cases where Sui registration succeeded but Walrus upload failed.
-pub async fn destroy_blob(object_id: &str) -> Result<(), (StatusCode, String)> {
-    warn!(
-        "[PLACEHOLDER] Deleting registered blob object {} on Sui",
-        object_id
+pub async fn build_destroy_blob_tx(
+    client: Arc<Client>,
+    sender: Address,
+    account_id: Address,
+    stream_id: &str,
+) -> Result<Transaction, (StatusCode, String)> {
+    let stream_id_addr: Address = stream_id.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid stream_id `{stream_id}` for Move `ID`: {e}"),
+        )
+    })?;
+    let mut client = client.as_ref().clone();
+    let mut builder = TransactionBuilder::new();
+    builder.set_sender(sender);
+
+    let account_arg = builder.object(ObjectInput::new(account_id));
+    let system_arg = builder.object(ObjectInput::new(WALRUS_SYSTEM.parse().unwrap()));
+    let stream_id_arg = builder.pure(&stream_id_addr);
+    builder.move_call(
+        Function::new(
+            PACKAGE.parse().unwrap(),
+            "creator".parse().unwrap(),
+            "destroy_blob".parse().unwrap(),
+        ),
+        vec![account_arg, system_arg, stream_id_arg],
     );
-    // TODO: Real Sui delete call for deletable blobs.
-    Ok(())
+
+    builder.build(&mut client).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to build destroy_blob tx for stream {stream_id}: {err}"),
+        )
+    })
 }

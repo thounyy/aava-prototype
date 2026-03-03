@@ -22,6 +22,7 @@ use aava::{
 // === Aliases ===
 
 use fun dof::add as UID.add;
+use fun dof::remove as UID.remove;
 use fun dof::borrow_mut as UID.borrow_mut;
 
 // === Errors ===
@@ -164,6 +165,26 @@ public fun certify_blob(
     let blob = stream.id.borrow_mut(BlobKey());
 
     system.certify_blob(blob, signature, signers_bitmap, message);
+    stream.status = STORED;
+}
+
+// if walrus upload failed, destroy the blob
+public fun destroy_blob(
+    account: &mut Account,
+    system: &mut System,
+    stream_id: ID,
+    ctx: &mut TxContext,
+) {
+    assert!(account.is_member(ctx.sender()), ENotMember);
+
+    let key = StreamKey(stream_id);
+    let stream: &mut Stream = account.id.borrow_mut(key);
+    assert!(stream.status == VERIFIED, EStreamNotVerified);
+
+    let blob = stream.id.remove(BlobKey());
+    let storage = system.delete_blob(blob);
+    storage.destroy();
+
     stream.status = STORED;
 }
 
