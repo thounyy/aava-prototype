@@ -2,44 +2,38 @@ use std::{str::FromStr, sync::Arc};
 
 use axum::http::StatusCode;
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
-use sui_crypto::ed25519::Ed25519PrivateKey;
 use sui_rpc::Client;
 use sui_sdk_types::{Address, StructTag, Transaction};
 use sui_transaction_builder::{intent::CoinWithBalance, Function, ObjectInput, TransactionBuilder};
-use tracing::{info, warn};
 use walrus_core::messages::ConfirmationCertificate;
 
-use crate::{
-    build_and_execute_tx,
-    sui::constants::{ENCLAVE_CONFIG, PACKAGE, WALRUS_SYSTEM, WAL_COIN_TYPE},
-};
+use crate::sui::constants::{ENCLAVE_CONFIG, PACKAGE, WALRUS_SYSTEM, WAL_COIN_TYPE};
 
 pub async fn build_create_stream_tx(
-    client: &mut Client,
-    pk: &Ed25519PrivateKey,
+    client: Arc<Client>,
+    sender: Address,
     account_id: Address,
-) -> Result<(), StatusCode> {
-    info!("Creating stream object {} on Sui", account_id);
+) -> Result<Transaction, (StatusCode, String)> {
+    let mut client = client.as_ref().clone();
+    let mut builder = TransactionBuilder::new();
+    builder.set_sender(sender);
 
-    let response = build_and_execute_tx!(client, pk, |builder| {
-        let account_arg = builder.object(ObjectInput::new(account_id));
-        builder.move_call(
-            Function::new(
-                PACKAGE.parse().unwrap(),
-                "creator".parse().unwrap(),
-                "start_stream".parse().unwrap(),
-            ),
-            vec![account_arg],
-        );
-    })?;
+    let account_arg = builder.object(ObjectInput::new(account_id));
+    builder.move_call(
+        Function::new(
+            PACKAGE.parse().unwrap(),
+            "creator".parse().unwrap(),
+            "create_stream".parse().unwrap(),
+        ),
+        vec![account_arg],
+    );
 
-    let execution_status = response.transaction().effects().status();
-    if !execution_status.success() {
-        warn!("Sui transaction failed while creating stream object: {execution_status:?}");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    Ok(())
+    builder.build(&mut client).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to build start stream tx: {err}"),
+        )
+    })
 }
 
 pub async fn build_verify_and_store_blob_tx(

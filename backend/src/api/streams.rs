@@ -31,12 +31,14 @@ pub fn create_router() -> Router<Arc<AppState>> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamStartRequest {
-    // fields
+    pub account_id: String,
+    pub sender: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamStartResponse {
-    pub stream_id: String,
+    pub tx_digest: String,
+    pub tx_bytes_b64: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,37 +76,44 @@ pub struct StreamEndFinalizeResponse {
     pub tx_bytes_b64: String,
 }
 
-/// Start a stream
-///
-/// Placeholder for Sui blockchain call to start a stream.
-/// In production, this would:
-/// - Call Sui to mark stream as active
-/// - Update stream object on-chain
-/// - Emit events for stream start
 async fn start_stream(
-    Json(_request): Json<StreamStartRequest>,
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<StreamStartRequest>,
 ) -> Result<Json<StreamStartResponse>, (StatusCode, String)> {
-    info!("Starting stream");
+    info!(
+        "Building start_stream tx for account {}",
+        request.account_id
+    );
 
-    // TODO: Real Sui implementation
-    // - Call Sui Move function to start stream
-    // - Update stream object status on-chain
-    // - Emit stream_start event
+    let account_id: Address = request.account_id.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid account_id `{}`: {e}", request.account_id),
+        )
+    })?;
+    let sender: Address = request.sender.parse().map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid sender `{}`: {e}", request.sender),
+        )
+    })?;
 
-    warn!("[PLACEHOLDER] Stream start - Sui call not implemented");
+    let tx =
+        sui::stream::build_create_stream_tx(state.sui_client.clone(), sender, account_id).await?;
+    let tx_digest = tx.digest().to_string();
+    let tx_bytes_b64 = URL_SAFE_NO_PAD.encode(bcs::to_bytes(&tx).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize create_stream tx bytes: {e}"),
+        )
+    })?);
 
     Ok(Json(StreamStartResponse {
-        stream_id: "stream_id".to_string(),
+        tx_digest,
+        tx_bytes_b64,
     }))
 }
 
-/// End a stream
-///
-/// This endpoint:
-/// 1. Calls enclave to query Redis and generate cryptographic attestation
-/// 2. Publishes attested session data to Walrus (decentralized storage)
-/// 3. Publishes hash to Sui blockchain
-/// 4. Cleans up sessions from Redis after successful upload
 async fn init_end_stream(
     State(state): State<Arc<AppState>>,
     Json(request): Json<StreamEndInitRequest>,
@@ -331,12 +340,13 @@ async fn finalize_end_stream(
     enclave::stream::cleanup_dataset(&request.stream_id).await?;
 
     let finalize_tx_digest = finalize_tx.digest().to_string();
-    let finalize_tx_bytes_b64 = URL_SAFE_NO_PAD.encode(bcs::to_bytes(&finalize_tx).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize finalize tx bytes: {e}"),
-        )
-    })?);
+    let finalize_tx_bytes_b64 =
+        URL_SAFE_NO_PAD.encode(bcs::to_bytes(&finalize_tx).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to serialize finalize tx bytes: {e}"),
+            )
+        })?);
 
     Ok(Json(StreamEndFinalizeResponse {
         stream_id: request.stream_id,
