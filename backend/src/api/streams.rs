@@ -159,7 +159,8 @@ async fn init_end_stream(
         )
     })?;
 
-    let price_per_unit_size = 1; // TODO: fetch price from system object
+    let price_per_unit_size =
+        sui::read::fetch_walrus_price_per_unit_size(state.sui_client.clone()).await?;
 
     let price_for_encoded_length =
         encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * price_per_unit_size * 53u64;
