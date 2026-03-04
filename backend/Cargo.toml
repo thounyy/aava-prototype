@@ -18,7 +18,6 @@ reqwest = { version = "0.13", features = ["json"] }
 serde_bytes = "0.11"
 base64 = "0.22"
 bcs = "0.1"
-hex = "0.4"
 prost-types = "0.14.3"
 
 sui-rpc = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-rpc", rev="e59f01e" }
