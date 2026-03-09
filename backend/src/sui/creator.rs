@@ -7,7 +7,40 @@ use sui_sdk_types::{Address, StructTag, Transaction};
 use sui_transaction_builder::{intent::CoinWithBalance, Function, ObjectInput, TransactionBuilder};
 use walrus_core::messages::ConfirmationCertificate;
 
-use crate::sui::constants::{ENCLAVE_CONFIG, PACKAGE, WALRUS_SYSTEM, WAL_COIN_TYPE};
+use crate::sui::constants::{
+    AAVA_PACKAGE, ACCOUNT_REGISTRY, ENCLAVE_CONFIG, WALRUS_SYSTEM, WAL_COIN_TYPE,
+};
+
+// TODO: modify for production
+pub async fn build_create_account_tx(
+    client: Arc<Client>,
+    sender: Address,
+    username: String,
+) -> Result<Transaction, (StatusCode, String)> {
+    let mut client = client.as_ref().clone();
+    let mut builder = TransactionBuilder::new();
+    builder.set_sender(sender);
+
+    let registry_arg = builder.object(ObjectInput::new(ACCOUNT_REGISTRY.parse().unwrap()));
+    let addr_arg = builder.pure(&sender);
+    let username_arg = builder.pure(&username);
+
+    builder.move_call(
+        Function::new(
+            AAVA_PACKAGE.parse().unwrap(),
+            "creator".parse().unwrap(),
+            "new_account_for_testing".parse().unwrap(),
+        ),
+        vec![registry_arg, addr_arg, username_arg],
+    );
+
+    builder.build(&mut client).await.map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to build start stream tx: {err}"),
+        )
+    })
+}
 
 pub async fn build_create_stream_tx(
     client: Arc<Client>,
@@ -21,7 +54,7 @@ pub async fn build_create_stream_tx(
     let account_arg = builder.object(ObjectInput::new(account_id));
     builder.move_call(
         Function::new(
-            PACKAGE.parse().unwrap(),
+            AAVA_PACKAGE.parse().unwrap(),
             "creator".parse().unwrap(),
             "create_stream".parse().unwrap(),
         ),
@@ -114,9 +147,9 @@ pub async fn build_verify_and_store_blob_tx(
 
     builder.move_call(
         Function::new(
-            PACKAGE.parse().unwrap(),
+            AAVA_PACKAGE.parse().unwrap(),
             "creator".parse().unwrap(),
-            "end_stream".parse().unwrap(),
+            "verify_and_store_blob".parse().unwrap(),
         ),
         vec![
             account_arg,
@@ -176,7 +209,7 @@ pub async fn build_certify_blob_tx(
 
     builder.move_call(
         Function::new(
-            PACKAGE.parse().unwrap(),
+            AAVA_PACKAGE.parse().unwrap(),
             "creator".parse().unwrap(),
             "certify_blob".parse().unwrap(),
         ),
@@ -236,7 +269,7 @@ pub async fn build_destroy_blob_tx(
     let stream_id_arg = builder.pure(&stream_id_addr);
     builder.move_call(
         Function::new(
-            PACKAGE.parse().unwrap(),
+            AAVA_PACKAGE.parse().unwrap(),
             "creator".parse().unwrap(),
             "destroy_blob".parse().unwrap(),
         ),

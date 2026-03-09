@@ -10,14 +10,12 @@ async fn main() -> anyhow::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    let sui_rpc_url =
-        std::env::var("SUI_RPC_URL").unwrap_or_else(|_| Client::TESTNET_FULLNODE.to_string());
-    let sui_client = Client::new(sui_rpc_url.as_str())?;
+    let sui_client = Client::new(Client::TESTNET_FULLNODE)?;
     let state = Arc::new(AppState { sui_client: Arc::new(sui_client) });
 
     // Create application router
     let app = Router::new()
-        .merge(api::viewers::create_router())
+        .merge(api::accounts::create_router())
         .merge(api::sessions::create_router())
         .merge(api::streams::create_router())
         .with_state(state);

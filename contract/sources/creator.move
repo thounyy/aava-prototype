@@ -62,6 +62,21 @@ public struct BlobKey() has copy, drop, store;
 
 // === Public functions ===
 
+// TODO: remove in production
+public fun new_account_for_testing(
+    registry: &mut AccountRegistry,
+    addr: address,
+    username: String,
+) {
+    let account = Account {
+        id: derived_object::claim(registry.uid_mut(), username),
+        members: vec_set::from_keys(vector[addr]),
+        metadata: vec_map::empty(),
+    };
+
+    transfer::share_object(account);
+}
+
 public fun new_account(
     registry: &mut AccountRegistry,
     request: CreatorRequest,

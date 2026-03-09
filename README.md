@@ -65,7 +65,19 @@ RUST_LOG=info cargo run
 
 ## Testing
 
-### 1. Test streams
+### 1. Test accounts 
+
+```bash
+# Test creating a creator account - need to sign built tx and execute
+curl -X POST http://127.0.0.1:8080/api/accounts/creator/create \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_handle":"<USER_HANDLE>",
+    "sender":"<SUI_ADDRESS>"
+  }'
+```
+
+### 2. Test streams
 
 ```bash
 # Test starting a stream
@@ -75,6 +87,7 @@ curl -X POST http://127.0.0.1:8080/api/streams/start \
     "account_id":"<ACCOUNT_OBJECT_ID>",
     "sender":"<SUI_ADDRESS>"
   }'
+  
 # Test ending a stream (verify and store blob) - need to sign built tx and execute
 curl -X POST http://127.0.0.1:8080/api/streams/end/init \
   -H "Content-Type: application/json" \
@@ -83,6 +96,7 @@ curl -X POST http://127.0.0.1:8080/api/streams/end/init \
     "account_id":"<ACCOUNT_OBJECT_ID>",
     "sender":"<SUI_ADDRESS>"
   }'
+
 # Test ending a stream (certifying blob) - need to sign built tx and execute
 curl -X POST http://127.0.0.1:8080/api/streams/end/finalize \
   -H "Content-Type: application/json" \
@@ -96,20 +110,21 @@ curl -X POST http://127.0.0.1:8080/api/streams/end/finalize \
   }'
 ```
 
-### 2. Test sessions
+### 3. Test sessions
 
 ```bash
 # Test opening a session
 curl -X POST http://127.0.0.1:8080/api/sessions/open \
   -H "Content-Type: application/json" \
   -d '{"viewer_id":"viewer1","stream_id":"<STREAM_ID>"}'
+
 # Test closing a session
 curl -X POST http://127.0.0.1:8080/api/sessions/close \
   -H "Content-Type: application/json" \
   -d '{"session_id":"<SESSION_ID_FROM_OPEN>"}'
 ```
 
-### 3. Verify Redis Sessions
+### 4. Verify Redis Sessions
 
 ```bash
 # Connect to Redis (with password)

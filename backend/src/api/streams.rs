@@ -1,7 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use serde::{Deserialize, Serialize};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
@@ -81,7 +84,7 @@ async fn start_stream(
     Json(request): Json<StreamStartRequest>,
 ) -> Result<Json<StreamStartResponse>, (StatusCode, String)> {
     info!(
-        "Building start_stream tx for account {}",
+        "Building create_stream tx for account {}",
         request.account_id
     );
 
@@ -99,9 +102,9 @@ async fn start_stream(
     })?;
 
     let tx =
-        sui::stream::build_create_stream_tx(state.sui_client.clone(), sender, account_id).await?;
+        sui::creator::build_create_stream_tx(state.sui_client.clone(), sender, account_id).await?;
     let tx_digest = tx.digest().to_string();
-    let tx_bytes_b64 = URL_SAFE_NO_PAD.encode(bcs::to_bytes(&tx).map_err(|e| {
+    let tx_bytes_b64 = STANDARD.encode(bcs::to_bytes(&tx).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to serialize create_stream tx bytes: {e}"),
@@ -177,7 +180,7 @@ async fn init_end_stream(
         )
     })?;
 
-    let tx = sui::stream::build_verify_and_store_blob_tx(
+    let tx = sui::creator::build_verify_and_store_blob_tx(
         state.sui_client.clone(),
         sender,
         account_id,
@@ -194,7 +197,7 @@ async fn init_end_stream(
     )
     .await?;
     let tx_digest = tx.digest().to_string().clone();
-    let tx_bytes_b64 = URL_SAFE_NO_PAD.encode(bcs::to_bytes(&tx).map_err(|e| {
+    let tx_bytes_b64 = STANDARD.encode(bcs::to_bytes(&tx).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to serialize tx bytes: {e}"),
@@ -310,7 +313,7 @@ async fn finalize_end_stream(
     let (finalize_action, finalize_tx) =
         match walrus::blob::upload_dataset(&object_id, &request.blob_id_b64, payload).await {
             Ok(relay_response) => {
-                let tx = sui::stream::build_certify_blob_tx(
+                let tx = sui::creator::build_certify_blob_tx(
                     state.sui_client.clone(),
                     sender,
                     account_id,
@@ -326,7 +329,7 @@ async fn finalize_end_stream(
                     "Walrus upload failed after successful tx {} for stream {}: {}",
                     request.end_tx_digest, request.stream_id, e
                 );
-                let tx = sui::stream::build_destroy_blob_tx(
+                let tx = sui::creator::build_destroy_blob_tx(
                     state.sui_client.clone(),
                     sender,
                     account_id,
@@ -341,13 +344,12 @@ async fn finalize_end_stream(
     enclave::stream::cleanup_dataset(&request.stream_id).await?;
 
     let finalize_tx_digest = finalize_tx.digest().to_string();
-    let finalize_tx_bytes_b64 =
-        URL_SAFE_NO_PAD.encode(bcs::to_bytes(&finalize_tx).map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to serialize finalize tx bytes: {e}"),
-            )
-        })?);
+    let finalize_tx_bytes_b64 = STANDARD.encode(bcs::to_bytes(&finalize_tx).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize finalize tx bytes: {e}"),
+        )
+    })?);
 
     Ok(Json(StreamEndFinalizeResponse {
         stream_id: request.stream_id,

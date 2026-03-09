@@ -254,11 +254,10 @@ fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error>
 
     let config = EncodingConfig::new(n_shards).get_for_type(EncodingType::RS2);
     let metadata = config.compute_metadata(blob)?;
-    let root_hash = metadata.metadata().compute_root_hash();
 
     Ok(WalrusMetadata {
         blob_id: metadata.blob_id().as_ref().to_vec(),
-        root_hash: root_hash.bytes().to_vec(),
+        root_hash: metadata.metadata().compute_root_hash().bytes().to_vec(),
         n_shards: metadata.n_shards(),
         unencoded_size: metadata.metadata().unencoded_length(),
         encoding_type: metadata.metadata().encoding_type(),
