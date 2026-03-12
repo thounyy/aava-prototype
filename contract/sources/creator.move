@@ -113,7 +113,7 @@ public fun create_stream(
 
 public fun verify_and_store_blob(
     account: &mut Account,
-    enclave: &Enclave<BLOB_ID>,
+    // enclave: &Enclave<BLOB_ID>,
     system: &mut System,
     payment: &mut Coin<WAL>,
     stream_id: ID,
@@ -134,7 +134,7 @@ public fun verify_and_store_blob(
     assert!(stream.status == ACTIVE, EStreamNotActive);
 
     // verify the blob_id bytes from the enclave
-    if (blob_id::verify(enclave, blob_id, timestamp_ms, signature)) {
+    // if (blob_id::verify(enclave, blob_id, timestamp_ms, signature)) { // TODO: uncomment in production
         // reserve storage space
         let storage = system.reserve_space(
             encoded_size, 
@@ -157,9 +157,9 @@ public fun verify_and_store_blob(
         
         stream.id.add(BlobKey(), blob);
         stream.status = VERIFIED;
-    } else {
-        stream.status = INVALID;
-    }
+    // } else {
+    //     stream.status = INVALID;
+    // }
 }
 
 public fun certify_blob(

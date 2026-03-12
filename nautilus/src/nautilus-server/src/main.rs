@@ -14,7 +14,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<()> {    
     let eph_kp = Ed25519KeyPair::generate(&mut rand::thread_rng());
 
     // Initialize Redis connection

@@ -245,12 +245,8 @@ struct WalrusMetadata {
 }
 
 fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error> {
-    let n_shards = std::env::var("WALRUS_N_SHARDS")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(31);
-    let n_shards =
-        NonZeroU16::new(n_shards).ok_or_else(|| anyhow::anyhow!("WALRUS_N_SHARDS must be > 0"))?;
+    // TODO: modify for production
+    let n_shards = NonZeroU16::new(1000).unwrap();
 
     let config = EncodingConfig::new(n_shards).get_for_type(EncodingType::RS2);
     let metadata = config.compute_metadata(blob)?;

@@ -1,6 +1,8 @@
-use crate::walrus::error::WalrusError;
+use base64::engine::{general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
-use walrus_core::{BlobId, messages::ConfirmationCertificate};
+use tracing::info;
+
+use crate::walrus::error::WalrusError;
 
 const DEFAULT_UPLOAD_RELAY_URL: &str = "https://upload-relay.testnet.walrus.space";
 
@@ -103,25 +105,50 @@ pub enum BlobStoreResult {
     },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize)]
+struct RawUploadRelayResponse {
+    blob_id: Vec<u8>,
+    confirmation_certificate: RawConfirmationCertificate,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawConfirmationCertificate {
+    signers: Vec<u16>,
+    serialized_message: Vec<u8>,
+    signature: String,
+}
+
+#[derive(Debug)]
 pub struct UploadRelayResponse {
-    pub blob_id: BlobId,
-    pub confirmation_certificate: ConfirmationCertificate,
+    pub blob_id: Vec<u8>,
+    pub certificate: CertificateData,
+}
+
+#[derive(Debug)]
+pub struct CertificateData {
+    pub signers: Vec<u16>,
+    pub serialized_message: Vec<u8>,
+    pub signature: Vec<u8>,
 }
 
 pub async fn upload_dataset(
     object_id: &str,
     blob_id: &str,
     dataset: Vec<u8>,
+    tx_id: Option<&str>,
+    nonce_b64: Option<&str>,
 ) -> Result<UploadRelayResponse, WalrusError> {
     let client = reqwest::Client::new();
-    let relay_base_url = std::env::var("WALRUS_UPLOAD_RELAY_URL")
-        .unwrap_or_else(|_| DEFAULT_UPLOAD_RELAY_URL.to_string());
-    let url = format!(
+    let mut url = format!(
         "{}/v1/blob-upload-relay?blob_id={}&deletable_blob_object={}",
-        relay_base_url, blob_id, object_id
+        DEFAULT_UPLOAD_RELAY_URL, blob_id, object_id
     );
+    if let Some(tx_id) = tx_id {
+        url.push_str(&format!("&tx_id={}", tx_id));
+    }
+    if let Some(nonce) = nonce_b64 {
+        url.push_str(&format!("&nonce={}", nonce));
+    }
 
     let response = client.post(url).body(dataset).send().await?;
     if !response.status().is_success() {
@@ -133,9 +160,31 @@ pub async fn upload_dataset(
         return Err(WalrusError::ApiError(status, body));
     }
 
-    let relay_response: UploadRelayResponse = response.json().await.map_err(|e| {
-        WalrusError::ParseError(format!("Failed to parse upload relay response: {e}"))
+    let body = response.text().await.map_err(|e| {
+        WalrusError::ParseError(format!("Failed to read upload relay response body: {e}"))
+    })?;
+    info!("Upload relay response body: {}", body);
+
+    let raw: RawUploadRelayResponse = serde_json::from_str(&body).map_err(|e| {
+        WalrusError::ParseError(format!(
+            "Failed to parse upload relay response: {e}\nBody: {body}"
+        ))
     })?;
 
-    Ok(relay_response)
+    let signature_bytes = STANDARD
+        .decode(&raw.confirmation_certificate.signature)
+        .map_err(|e| {
+            WalrusError::ParseError(format!(
+                "Failed to decode certificate signature: {e}"
+            ))
+        })?;
+
+    Ok(UploadRelayResponse {
+        blob_id: raw.blob_id,
+        certificate: CertificateData {
+            signers: raw.confirmation_certificate.signers,
+            serialized_message: raw.confirmation_certificate.serialized_message,
+            signature: signature_bytes,
+        },
+    })
 }

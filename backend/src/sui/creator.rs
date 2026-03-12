@@ -4,12 +4,18 @@ use axum::http::StatusCode;
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use sui_rpc::Client;
 use sui_sdk_types::{Address, StructTag, Transaction};
-use sui_transaction_builder::{intent::CoinWithBalance, Function, ObjectInput, TransactionBuilder};
-use walrus_core::messages::ConfirmationCertificate;
+use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder, intent::CoinWithBalance};
+
+use crate::walrus::blob::CertificateData;
 
 use crate::sui::constants::{
     AAVA_PACKAGE, ACCOUNT_REGISTRY, ENCLAVE_CONFIG, WALRUS_SYSTEM, WAL_COIN_TYPE,
 };
+
+pub struct TipPayment {
+    pub address: Address,
+    pub amount: u64,
+}
 
 // TODO: modify for production
 pub async fn build_create_account_tx(
@@ -83,6 +89,8 @@ pub async fn build_verify_and_store_blob_tx(
     encoding_type: u8,
     encoded_size: u64,
     deletable: bool,
+    auth_payload: Option<Vec<u8>>,
+    tip_payment: Option<TipPayment>,
 ) -> Result<Transaction, (StatusCode, String)> {
     let mut client = client.as_ref().clone();
     if blob_id.len() != 32 {
@@ -107,6 +115,11 @@ pub async fn build_verify_and_store_blob_tx(
     let mut builder = TransactionBuilder::new();
     builder.set_sender(sender);
 
+    // Auth payload must be input 0 for the upload relay to verify tip payment.
+    if let Some(payload) = auth_payload {
+        let _auth_input = builder.pure_bytes(payload);
+    }
+
     let stream_id_addr: Address = stream_id.parse().map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -120,26 +133,18 @@ pub async fn build_verify_and_store_blob_tx(
         )
     })?;
 
-    let mut blob_id_u256_le = [0u8; 32];
-    blob_id_u256_le.copy_from_slice(blob_id);
-    blob_id_u256_le.reverse();
-
-    let mut root_hash_u256_le = [0u8; 32];
-    root_hash_u256_le.copy_from_slice(root_hash);
-    root_hash_u256_le.reverse();
-
     let wal_struct_tag = StructTag::from_str(WAL_COIN_TYPE).unwrap();
     let coin_with_balance = CoinWithBalance::new(wal_struct_tag, payment_amount);
 
     let account_arg = builder.object(ObjectInput::new(account_id));
-    let enclave_arg = builder.object(ObjectInput::new(ENCLAVE_CONFIG.parse().unwrap()));
+    let _enclave_arg = builder.object(ObjectInput::new(ENCLAVE_CONFIG.parse().unwrap()));
     let system_arg = builder.object(ObjectInput::new(WALRUS_SYSTEM.parse().unwrap()));
     let payment_arg = builder.intent(coin_with_balance);
     let stream_id_arg = builder.pure(&stream_id_addr);
     let timestamp_arg = builder.pure(&timestamp_ms);
     let signature_arg = builder.pure(&signature_bytes);
-    let blob_id_arg = builder.pure_bytes(blob_id_u256_le.to_vec());
-    let root_hash_arg = builder.pure_bytes(root_hash_u256_le.to_vec());
+    let blob_id_arg = builder.pure_bytes(blob_id.to_vec());
+    let root_hash_arg = builder.pure_bytes(root_hash.to_vec());
     let unencoded_size_arg = builder.pure(&unencoded_size);
     let encoding_type_arg = builder.pure(&encoding_type);
     let encoded_size_arg = builder.pure(&encoded_size);
@@ -153,7 +158,7 @@ pub async fn build_verify_and_store_blob_tx(
         ),
         vec![
             account_arg,
-            enclave_arg,
+            // enclave_arg, // TODO: uncomment in production
             system_arg,
             payment_arg,
             stream_id_arg,
@@ -168,10 +173,30 @@ pub async fn build_verify_and_store_blob_tx(
         ],
     );
 
+    let sender_arg = builder.pure(&sender);
+    builder.transfer_objects(vec![payment_arg], sender_arg);
+
+    if let Some(tip) = tip_payment {
+        let tip_amount_arg = builder.pure(&tip.amount);
+        let gas = builder.gas();
+        let tip_coins = builder.split_coins(gas, vec![tip_amount_arg]);
+        let tip_recipient_arg = builder.pure(&tip.address);
+        builder.transfer_objects(tip_coins, tip_recipient_arg);
+    }
+
+    // builder.move_call(
+    //     Function::new(
+    //         SUI_PACKAGE.parse().unwrap(),
+    //         "coin".parse().unwrap(),
+    //         "destroy_zero".parse().unwrap(),
+    //     ),
+    //     vec![payment_arg],
+    // );
+
     builder.build(&mut client).await.map_err(|err| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to build stream end tx: {err}"),
+            format!("Failed to build verify_and_store_blob tx: {err}"),
         )
     })
 }
@@ -183,7 +208,7 @@ pub async fn build_certify_blob_tx(
     sender: Address,
     account_id: Address,
     stream_id: &str,
-    confirmation_certificate: &ConfirmationCertificate,
+    certificate: &CertificateData,
 ) -> Result<Transaction, (StatusCode, String)> {
     let mut client = client.as_ref().clone();
 
@@ -193,9 +218,9 @@ pub async fn build_certify_blob_tx(
             format!("Invalid stream_id `{stream_id}` for Move `ID`: {e}"),
         )
     })?;
-    let signature = &confirmation_certificate.signature.as_ref().to_vec();
-    let signers_bitmap = signers_to_bitmap(&confirmation_certificate.signers)?;
-    let message = &confirmation_certificate.serialized_message;
+    let signature = &certificate.signature;
+    let signers_bitmap = signers_to_bitmap(&certificate.signers)?;
+    let message = &certificate.serialized_message;
 
     let mut builder = TransactionBuilder::new();
     builder.set_sender(sender);

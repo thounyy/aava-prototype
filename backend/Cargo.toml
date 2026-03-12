@@ -19,6 +19,8 @@ serde_bytes = "0.11"
 base64 = "0.22"
 bcs = "0.1"
 prost-types = "0.14.3"
+sha2 = "0.10"
+rand = "0.10"
 
 sui-rpc = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-rpc", rev="e59f01e" }
 sui-graphql = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-graphql", rev="e59f01e" }
@@ -26,8 +28,5 @@ sui-sdk-types = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = 
 sui-transaction-builder = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-transaction-builder", rev="e59f01e" }
 sui-crypto = { git = "https://github.com/mystenlabs/sui-rust-sdk", package = "sui-crypto", rev="e59f01e", features = ["ed25519"] }
 walrus-core = { git = "https://github.com/MystenLabs/walrus", package = "walrus-core", rev = "f5a31ad" }
-
-
-
 
 

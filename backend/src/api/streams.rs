@@ -5,7 +5,9 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine as _,
 };
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
 use sui_sdk_types::Address;
@@ -59,6 +61,7 @@ pub struct StreamEndInitResponse {
     pub tx_bytes_b64: String,
     pub blob_id_b64: String,
     pub payload_b64: String,
+    pub nonce_b64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,6 +72,7 @@ pub struct StreamEndFinalizeRequest {
     pub end_tx_digest: String,
     pub blob_id_b64: String,
     pub payload_b64: String,
+    pub nonce_b64: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,11 +143,12 @@ async fn init_end_stream(
             tx_bytes_b64: String::new(),
             blob_id_b64: String::new(),
             payload_b64: String::new(),
+            nonce_b64: None,
         }));
     }
 
     // Step 2: Verify signature + register blob on Sui (atomic tx)
-    let payload = serde_json::to_vec(&data).map_err(|e| {
+    let payload = serde_json::to_vec(&data.sessions).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to serialize Walrus payload: {e}"),
@@ -180,6 +185,53 @@ async fn init_end_stream(
         )
     })?;
 
+    // Fetch upload relay tip config and prepare auth payload + tip if required
+    let tip_config = walrus::tip::fetch_tip_config().await.map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to fetch upload relay tip config: {e}"),
+        )
+    })?;
+
+    let (auth_payload, tip_payment, nonce_b64) = match &tip_config {
+        walrus::tip::TipConfigResponse::SendTip(config) => {
+            let nonce: [u8; 32] = rand::rng().random();
+            let blob_digest = Sha256::digest(&payload);
+            let nonce_digest = Sha256::digest(&nonce);
+
+            // auth_payload = blob_digest || nonce_digest || unencoded_length (u64 LE)
+            let mut auth = Vec::with_capacity(72);
+            auth.extend_from_slice(&blob_digest);
+            auth.extend_from_slice(&nonce_digest);
+            auth.extend_from_slice(&(payload.len() as u64).to_le_bytes());
+
+            let tip_amount = match &config.kind {
+                walrus::tip::TipKind::Const(v) => *v,
+                walrus::tip::TipKind::Linear {
+                    base,
+                    per_encoded_kib,
+                } => base + per_encoded_kib * encoded_size.div_ceil(1024),
+            };
+
+            let tip_address: Address = config.address.parse().map_err(|e| {
+                (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Invalid tip address from relay: {e}"),
+                )
+            })?;
+
+            (
+                Some(auth),
+                Some(sui::creator::TipPayment {
+                    address: tip_address,
+                    amount: tip_amount,
+                }),
+                Some(URL_SAFE_NO_PAD.encode(nonce)),
+            )
+        }
+        walrus::tip::TipConfigResponse::NoTip => (None, None, None),
+    };
+
     let tx = sui::creator::build_verify_and_store_blob_tx(
         state.sui_client.clone(),
         sender,
@@ -194,6 +246,8 @@ async fn init_end_stream(
         data.encoding_type.into(),
         encoded_size,
         true,
+        auth_payload,
+        tip_payment,
     )
     .await?;
     let tx_digest = tx.digest().to_string().clone();
@@ -217,6 +271,7 @@ async fn init_end_stream(
         tx_bytes_b64,
         blob_id_b64: URL_SAFE_NO_PAD.encode(&data.blob_id),
         payload_b64: URL_SAFE_NO_PAD.encode(payload),
+        nonce_b64,
     }))
 }
 
@@ -285,6 +340,7 @@ async fn finalize_end_stream(
         }
     }
     let tx = tx_opt.ok_or_else(|| {
+        // TODO: handle case when not verified on-chain
         (
             StatusCode::GATEWAY_TIMEOUT,
             format!(
@@ -310,35 +366,41 @@ async fn finalize_end_stream(
             )
         })?;
 
-    let (finalize_action, finalize_tx) =
-        match walrus::blob::upload_dataset(&object_id, &request.blob_id_b64, payload).await {
-            Ok(relay_response) => {
-                let tx = sui::creator::build_certify_blob_tx(
-                    state.sui_client.clone(),
-                    sender,
-                    account_id,
-                    &request.stream_id,
-                    &relay_response.confirmation_certificate,
-                )
-                .await?;
-                ("certify_blob".to_string(), tx)
-            }
-            Err(e) => {
-                // TODO: keep data in separate db
-                warn!(
-                    "Walrus upload failed after successful tx {} for stream {}: {}",
-                    request.end_tx_digest, request.stream_id, e
-                );
-                let tx = sui::creator::build_destroy_blob_tx(
-                    state.sui_client.clone(),
-                    sender,
-                    account_id,
-                    &request.stream_id,
-                )
-                .await?;
-                ("destroy_blob".to_string(), tx)
-            }
-        };
+    let (finalize_action, finalize_tx) = match walrus::blob::upload_dataset(
+        &object_id,
+        &request.blob_id_b64,
+        payload,
+        Some(&request.end_tx_digest),
+        request.nonce_b64.as_deref(),
+    )
+    .await
+    {
+        Ok(relay_response) => {
+            let tx = sui::creator::build_certify_blob_tx(
+                state.sui_client.clone(),
+                sender,
+                account_id,
+                &request.stream_id,
+                &relay_response.certificate,
+            )
+            .await?;
+            ("certify_blob".to_string(), tx)
+        }
+        Err(e) => {
+            warn!(
+                "Walrus upload failed after successful tx {} for stream {}: {}",
+                request.end_tx_digest, request.stream_id, e
+            );
+            let tx = sui::creator::build_destroy_blob_tx(
+                state.sui_client.clone(),
+                sender,
+                account_id,
+                &request.stream_id,
+            )
+            .await?;
+            ("destroy_blob".to_string(), tx)
+        }
+    };
 
     // TODO: assess how to handle cleanup in case of failure
     enclave::stream::cleanup_dataset(&request.stream_id).await?;
