@@ -5,7 +5,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine as _,
 };
-use rand::{Rng, RngExt};
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
@@ -169,6 +169,7 @@ async fn init_end_stream(
 
     let price_per_unit_size =
         sui::read::fetch_walrus_price_per_unit_size(state.sui_client.clone()).await?;
+    tracing::info!("Walrus price per unit size: {}", price_per_unit_size);
 
     let price_for_encoded_length =
         encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * price_per_unit_size * 53u64;
