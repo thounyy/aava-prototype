@@ -9,9 +9,14 @@ use sui_sdk_types::Address;
 
 use crate::sui::constants::WALRUS_SYSTEM;
 
-pub async fn fetch_walrus_price_per_unit_size(
+pub struct WalrusSystemParams {
+    pub price_per_unit_size: u64,
+    pub n_shards: u16,
+}
+
+pub async fn fetch_walrus_system_params(
     client: Arc<Client>,
-) -> Result<u64, (StatusCode, String)> {
+) -> Result<WalrusSystemParams, (StatusCode, String)> {
     let parent_id: Address = WALRUS_SYSTEM.parse().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -89,7 +94,7 @@ pub async fn fetch_walrus_price_per_unit_size(
         }
     };
 
-    let parse = |key: &str| -> Result<u64, (StatusCode, String)> {
+    let parse_u64 = |key: &str| -> Result<u64, (StatusCode, String)> {
         match inner.get(key).and_then(|v| v.kind.as_ref()) {
             Some(Kind::StringValue(s)) => s.parse().map_err(|_| {
                 (
@@ -104,5 +109,39 @@ pub async fn fetch_walrus_price_per_unit_size(
         }
     };
 
-    Ok(parse("storage_price_per_unit_size")? + parse("write_price_per_unit_size")?)
+    let price_per_unit_size =
+        parse_u64("storage_price_per_unit_size")? + parse_u64("write_price_per_unit_size")?;
+
+    let committee = match inner.get("committee").and_then(|v| v.kind.as_ref()) {
+        Some(Kind::StructValue(s)) => &s.fields,
+        _ => {
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                "Missing 'committee' in SystemStateInnerV1".to_string(),
+            ))
+        }
+    };
+    let n_shards = match committee.get("n_shards").and_then(|v| v.kind.as_ref()) {
+        Some(Kind::NumberValue(n)) => {
+            let v = *n as u16;
+            if v == 0 {
+                return Err((
+                    StatusCode::BAD_GATEWAY,
+                    "n_shards is zero".to_string(),
+                ));
+            }
+            v
+        }
+        _ => {
+            return Err((
+                StatusCode::BAD_GATEWAY,
+                "Missing n_shards in committee".to_string(),
+            ))
+        }
+    };
+
+    Ok(WalrusSystemParams {
+        price_per_unit_size,
+        n_shards,
+    })
 }

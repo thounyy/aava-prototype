@@ -31,6 +31,7 @@ pub struct EnclaveStreamData {
     pub n_shards: NonZeroU16,
     pub unencoded_size: u64,
     pub encoding_type: EncodingType,
+    pub encoded_size: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -47,6 +48,7 @@ pub struct EnclaveSessionData {
 /// Returns (data, signature, timestamp_ms).
 pub async fn fetch_signed_dataset(
     stream_id: &str,
+    n_shards: u16,
 ) -> Result<(EnclaveStreamData, String, u64), (StatusCode, String)> {
     let enclave_url =
         std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -54,7 +56,7 @@ pub async fn fetch_signed_dataset(
     let client = reqwest::Client::new();
     let response = client
         .post(&format!("{}/end_stream", enclave_url))
-        .json(&serde_json::json!({ "stream_id": stream_id }))
+        .json(&serde_json::json!({ "stream_id": stream_id, "n_shards": n_shards }))
         .send()
         .await
         .map_err(|e| {

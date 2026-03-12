@@ -12,8 +12,6 @@ use sui_rpc::field::{FieldMask, FieldMaskUtil};
 use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
 use sui_sdk_types::Address;
 use tracing::{info, warn};
-use walrus_core::encoding;
-
 use crate::enclave;
 use crate::sui;
 use crate::walrus;
@@ -129,10 +127,13 @@ async fn init_end_stream(
         "Ending stream {} - calling enclave to batch sessions and generate attestation",
         request.stream_id
     );
+    
+    let walrus_params =
+        sui::read::fetch_walrus_system_params(state.sui_client.clone()).await?;
 
     // Step 1: Fetch attested sessions from enclave
     let (data, signature, timestamp_ms) =
-        enclave::stream::fetch_signed_dataset(&request.stream_id).await?;
+        enclave::stream::fetch_signed_dataset(&request.stream_id, walrus_params.n_shards).await?;
 
     if data.sessions_count == 0 {
         warn!("No active sessions found for stream {}", request.stream_id);
@@ -155,24 +156,8 @@ async fn init_end_stream(
         )
     })?;
 
-    let encoded_size = encoding::encoded_blob_length_for_n_shards(
-        data.n_shards,
-        data.unencoded_size,
-        data.encoding_type,
-    )
-    .ok_or_else(|| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Cannot compute Walrus encoded size".to_string(),
-        )
-    })?;
-
-    let price_per_unit_size =
-        sui::read::fetch_walrus_price_per_unit_size(state.sui_client.clone()).await?;
-    tracing::info!("Walrus price per unit size: {}", price_per_unit_size);
-
     let price_for_encoded_length =
-        encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * price_per_unit_size * 53u64;
+        data.encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * walrus_params.price_per_unit_size * 53u64;
     let account_id: Address = request.account_id.parse().map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
@@ -211,7 +196,7 @@ async fn init_end_stream(
                 walrus::tip::TipKind::Linear {
                     base,
                     per_encoded_kib,
-                } => base + per_encoded_kib * encoded_size.div_ceil(1024),
+                } => base + per_encoded_kib * data.encoded_size.div_ceil(1024),
             };
 
             let tip_address: Address = config.address.parse().map_err(|e| {
@@ -245,7 +230,7 @@ async fn init_end_stream(
         &data.root_hash,
         data.unencoded_size,
         data.encoding_type.into(),
-        encoded_size,
+        data.encoded_size,
         true,
         auth_payload,
         tip_payment,

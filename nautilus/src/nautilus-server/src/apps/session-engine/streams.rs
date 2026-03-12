@@ -22,6 +22,7 @@ use walrus_core::{
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EndStreamRequest {
     pub stream_id: String,
+    pub n_shards: u16,
 }
 
 /// Response payload for ending a stream
@@ -36,6 +37,7 @@ pub struct EndStreamResponse {
     pub n_shards: NonZeroU16,
     pub unencoded_size: u64,
     pub encoding_type: EncodingType,
+    pub encoded_size: u64,
 }
 
 /// Request payload for cleaning up sessions after Walrus upload
@@ -140,9 +142,10 @@ pub async fn end_stream(
     // Serialize session data and compute Walrus blob metadata for verification.
     let data_json = serde_json::to_string(&sessions)
         .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize sessions: {}", e)))?;
-    let walrus_metadata = compute_walrus_metadata(data_json.as_bytes()).map_err(|e| {
-        EnclaveError::GenericError(format!("Failed to compute Walrus blob id: {}", e))
-    })?;
+    let walrus_metadata =
+        compute_walrus_metadata(request.n_shards, data_json.as_bytes()).map_err(|e| {
+            EnclaveError::GenericError(format!("Failed to compute Walrus blob id: {}", e))
+        })?;
 
     let response_data = EndStreamResponse {
         stream_id: request.stream_id.clone(),
@@ -153,6 +156,7 @@ pub async fn end_stream(
         n_shards: walrus_metadata.n_shards,
         unencoded_size: walrus_metadata.unencoded_size,
         encoding_type: walrus_metadata.encoding_type,
+        encoded_size: walrus_metadata.encoded_size,
     };
 
     // Generate cryptographic attestation using enclave keypair
@@ -242,11 +246,12 @@ struct WalrusMetadata {
     n_shards: NonZeroU16,
     unencoded_size: u64,
     encoding_type: EncodingType,
+    encoded_size: u64,
 }
 
-fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error> {
+fn compute_walrus_metadata(n_shards: u16, blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error> {
     // TODO: modify for production
-    let n_shards = NonZeroU16::new(1000).unwrap();
+    let n_shards = NonZeroU16::new(n_shards).unwrap();
 
     let config = EncodingConfig::new(n_shards).get_for_type(EncodingType::RS2);
     let metadata = config.compute_metadata(blob)?;
@@ -257,5 +262,9 @@ fn compute_walrus_metadata(blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error>
         n_shards: metadata.n_shards(),
         unencoded_size: metadata.metadata().unencoded_length(),
         encoding_type: metadata.metadata().encoding_type(),
+        encoded_size: metadata
+            .metadata()
+            .encoded_size()
+            .ok_or_else(|| anyhow::anyhow!("Encoded size is None"))?,
     })
 }
