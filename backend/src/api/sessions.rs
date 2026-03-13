@@ -100,7 +100,7 @@ async fn open_session(
 
     let client = reqwest::Client::new();
     let response = client
-        .post(&format!("{}/internal/v1/sessions/open", enclave_url))
+        .post(&format!("{}/internal/sessions/open", enclave_url))
         .header("X-Internal-Token", token)
         .json(&request_body)
         .send()
@@ -158,7 +158,7 @@ async fn close_session(
 
     let client = reqwest::Client::new();
     let response = client
-        .post(&format!("{}/internal/v1/sessions/close", enclave_url))
+        .post(&format!("{}/internal/sessions/close", enclave_url))
         .header("X-Internal-Token", token)
         .json(&request_body)
         .send()

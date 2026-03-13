@@ -63,7 +63,7 @@ pub async fn fetch_signed_dataset(
     let token = enclave_internal_token()?;
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{url}/internal/v1/streams/end"))
+        .post(format!("{url}/internal/streams/end"))
         .header("X-Internal-Token", token)
         .json(&serde_json::json!({ "stream_id": stream_id, "n_shards": n_shards }))
         .send()
@@ -105,7 +105,7 @@ pub async fn cleanup_dataset(stream_id: &str) -> Result<(), EnclaveError> {
     let token = enclave_internal_token()?;
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{url}/internal/v1/streams/cleanup"))
+        .post(format!("{url}/internal/streams/cleanup"))
         .header("X-Internal-Token", token)
         .json(&serde_json::json!({ "stream_id": stream_id }))
         .send()
