@@ -10,56 +10,31 @@ use nautilus_server::AppState;
 use redis::aio::ConnectionManager;
 use redis::Client;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::info;
 
 #[tokio::main]
-async fn main() -> Result<()> {    
+async fn main() -> Result<()> {
     let eph_kp = Ed25519KeyPair::generate(&mut rand::thread_rng());
     let _internal_token = std::env::var("ENCLAVE_INTERNAL_TOKEN")
         .map_err(|_| anyhow::anyhow!("ENCLAVE_INTERNAL_TOKEN must be defined"))?;
 
-    // Initialize Redis connection
+    let redis_password = std::env::var("REDIS_PASSWORD")
+        .map_err(|_| anyhow::anyhow!("REDIS_PASSWORD must be defined"))?;
+    if redis_password.is_empty() {
+        return Err(anyhow::anyhow!("REDIS_PASSWORD must not be empty"));
+    }
+
     let redis_url =
         std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
-    let client = Client::open(redis_url.clone())?;
+    let client = Client::open(redis_url)?;
     let mut redis = ConnectionManager::new(client).await?;
 
-    // Authenticate with Redis
-    // Priority: REDIS_PASSWORD env var > password in URL
-    // REDIS_PASSWORD is more secure (doesn't show in process list)
-    if let Ok(password) = std::env::var("REDIS_PASSWORD") {
-        if !password.is_empty() {
-            let _: String = redis::cmd("AUTH")
-                .arg(&password)
-                .query_async(&mut redis)
-                .await
-                .map_err(|e| anyhow::anyhow!("Redis authentication failed: {}", e))?;
-            info!("Redis authentication successful (using REDIS_PASSWORD)");
-        }
-    } else if redis_url.contains("@") && redis_url.contains(":") {
-        // Password might be in URL format: redis://:password@host:port
-        // The redis crate should handle this, but verify connection works
-        let _: String = redis::cmd("PING")
-            .query_async(&mut redis)
-            .await
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "Redis connection test failed (check password in URL): {}",
-                    e
-                )
-            })?;
-        info!("Redis connection verified (password from URL)");
-    } else {
-        // No password - test connection (will fail if Redis requires auth)
-        let _: String = redis::cmd("PING")
-            .query_async(&mut redis)
-            .await
-            .map_err(|e| anyhow::anyhow!("Redis connection failed. If Redis requires authentication, set REDIS_PASSWORD env var or include password in REDIS_URL: {}", e))?;
-        warn!(
-            "Redis connection established WITHOUT authentication - NOT RECOMMENDED for production!"
-        );
-    }
+    let _: String = redis::cmd("AUTH")
+        .arg(&redis_password)
+        .query_async(&mut redis)
+        .await
+        .map_err(|e| anyhow::anyhow!("Redis authentication failed: {}", e))?;
 
     info!("Redis connection established and authenticated");
 

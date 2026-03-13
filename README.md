@@ -157,8 +157,7 @@ The architecture ensures data integrity through multiple layers:
 - ✅ Run enclave in TEE (AWS Nitro Enclaves, Intel SGX, etc.)
 
 **Development:**
-- ⚠️ Redis password is still required (prevents accidental access)
-- ⚠️ Use `REDIS_PASSWORD` env var (more secure than URL)
+- ⚠️ `REDIS_PASSWORD` is required (no unauthenticated Redis)
 - ⚠️ Don't commit passwords to git
 
 ## Configuration
@@ -171,8 +170,7 @@ The architecture ensures data integrity through multiple layers:
 
 **Enclave:**
 - `REDIS_URL`: Redis connection URL (default: `redis://localhost:6379`)
-- `REDIS_PASSWORD`: Redis password (recommended, more secure than URL)
-- Alternative: Include password in `REDIS_URL` as `redis://:password@localhost:6379`
+- `REDIS_PASSWORD`: Redis password (**required**)
 - `ENCLAVE_INTERNAL_TOKEN`: shared secret expected from backend in `X-Internal-Token` (**required**)
 
 ### Ports
