@@ -25,10 +25,7 @@ pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024;
 
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
-        .route(
-            "/api/creators/{account_handle}/streams",
-            post(start_stream),
-        )
+        .route("/api/creators/{account_handle}/streams", post(start_stream))
         .route(
             "/api/creators/{account_handle}/streams/{stream_id}/end",
             post(end_stream),
@@ -113,9 +110,8 @@ async fn end_stream(
     }
 
     // ── 3. Prepare payload & tip ────────────────────────────────────
-    let payload = serde_json::to_vec(&data.sessions).map_err(|e| {
-        AppError::Internal(format!("Failed to serialize Walrus payload: {e}"))
-    })?;
+    let payload = serde_json::to_vec(&data.sessions)
+        .map_err(|e| AppError::Internal(format!("Failed to serialize Walrus payload: {e}")))?;
 
     let price_for_encoded_length =
         data.encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * walrus_params.price_per_unit_size * 53;
@@ -135,9 +131,10 @@ async fn end_stream(
 
             let tip_amount = match &config.kind {
                 walrus::tip::TipKind::Const(v) => *v,
-                walrus::tip::TipKind::Linear { base, per_encoded_kib } => {
-                    base + per_encoded_kib * data.encoded_size.div_ceil(1024)
-                }
+                walrus::tip::TipKind::Linear {
+                    base,
+                    per_encoded_kib,
+                } => base + per_encoded_kib * data.encoded_size.div_ceil(1024),
             };
 
             let tip_address: Address = config
@@ -279,7 +276,5 @@ async fn find_blob_object_id(
         .iter()
         .find(|obj| obj.object_type().contains("Blob"))
         .map(|obj| obj.object_id().to_string())
-        .ok_or_else(|| {
-            AppError::Internal(format!("No Blob object found in tx {tx_digest}"))
-        })
+        .ok_or_else(|| AppError::Internal(format!("No Blob object found in tx {tx_digest}")))
 }

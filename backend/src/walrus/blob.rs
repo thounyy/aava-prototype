@@ -150,7 +150,13 @@ pub async fn upload_dataset(
         url.push_str(&format!("&nonce={}", nonce));
     }
 
-    let response = client.post(url).body(dataset).send().await?;
+    let response = client
+        .post(&url)
+        .header("Content-Type", "application/octet-stream")
+        .body(dataset)
+        .send()
+        .await?;
+
     if !response.status().is_success() {
         let status = response.status();
         let body = response
