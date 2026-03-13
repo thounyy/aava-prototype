@@ -1,5 +1,5 @@
 use axum::Router;
-use session_engine::{AppState, api};
+use session_engine::{AppState, api, sui};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use sui_rpc::Client;
@@ -7,20 +7,21 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
     tracing_subscriber::fmt::init();
 
-    let sui_client = Client::new(Client::TESTNET_FULLNODE)?;
-    let state = Arc::new(AppState { sui_client: Arc::new(sui_client) });
+    info!("Server wallet address: {}", sui::executor::wallet_address());
 
-    // Create application router
+    let sui_client = Client::new(Client::TESTNET_FULLNODE)?;
+    let state = Arc::new(AppState {
+        sui_client: Arc::new(sui_client),
+    });
+
     let app = Router::new()
         .merge(api::accounts::create_router())
         .merge(api::sessions::create_router())
         .merge(api::streams::create_router())
         .with_state(state);
 
-    // Start server
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
     info!("Server starting on {}", addr);
 
