@@ -9,7 +9,7 @@ Aava is a programmable video layer that leverages AI-powered compression and dec
 │   Client    │
 └──────┬──────┘
        │
-       │ POST /api/sessions/open
+       │ POST /api/viewers/{viewer}/streams/{stream}/sessions
        ▼
 ┌─────────────────┐
 │   Backend API   │  (Port 8080)
@@ -167,11 +167,13 @@ The architecture ensures data integrity through multiple layers:
 
 **Backend:**
 - `ENCLAVE_URL`: URL of the enclave (default: `http://localhost:3000`)
+- `ENCLAVE_INTERNAL_TOKEN`: shared secret sent to enclave as `X-Internal-Token` (**required**)
 
 **Enclave:**
 - `REDIS_URL`: Redis connection URL (default: `redis://localhost:6379`)
 - `REDIS_PASSWORD`: Redis password (recommended, more secure than URL)
 - Alternative: Include password in `REDIS_URL` as `redis://:password@localhost:6379`
+- `ENCLAVE_INTERNAL_TOKEN`: shared secret expected from backend in `X-Internal-Token` (**required**)
 
 ### Ports
 

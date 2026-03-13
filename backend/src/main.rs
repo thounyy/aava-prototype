@@ -10,6 +10,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     info!("Server wallet address: {}", sui::executor::wallet_address());
+    let _internal_token = std::env::var("ENCLAVE_INTERNAL_TOKEN")
+        .map_err(|_| anyhow::anyhow!("ENCLAVE_INTERNAL_TOKEN must be defined"))?;
 
     let sui_client = Client::new(Client::TESTNET_FULLNODE)?;
     let state = Arc::new(AppState {

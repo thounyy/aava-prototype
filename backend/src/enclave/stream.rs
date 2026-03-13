@@ -47,6 +47,11 @@ fn enclave_url() -> String {
     std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string())
 }
 
+fn enclave_internal_token() -> Result<String, EnclaveError> {
+    std::env::var("ENCLAVE_INTERNAL_TOKEN")
+        .map_err(|_| EnclaveError::ParseError("Missing ENCLAVE_INTERNAL_TOKEN".into()))
+}
+
 /// Fetch attested session data from the enclave.
 ///
 /// Returns (data, signature, timestamp_ms).
@@ -55,9 +60,11 @@ pub async fn fetch_signed_dataset(
     n_shards: u16,
 ) -> Result<(EnclaveStreamData, String, u64), EnclaveError> {
     let url = enclave_url();
+    let token = enclave_internal_token()?;
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{url}/end_stream"))
+        .post(format!("{url}/internal/v1/streams/end"))
+        .header("X-Internal-Token", token)
         .json(&serde_json::json!({ "stream_id": stream_id, "n_shards": n_shards }))
         .send()
         .await?;
@@ -95,9 +102,11 @@ pub async fn fetch_signed_dataset(
 /// Cleanup stream data from Redis after successful Walrus upload.
 pub async fn cleanup_dataset(stream_id: &str) -> Result<(), EnclaveError> {
     let url = enclave_url();
+    let token = enclave_internal_token()?;
     let client = reqwest::Client::new();
     let response = client
-        .post(format!("{url}/cleanup_stream"))
+        .post(format!("{url}/internal/v1/streams/cleanup"))
+        .header("X-Internal-Token", token)
         .json(&serde_json::json!({ "stream_id": stream_id }))
         .send()
         .await?;

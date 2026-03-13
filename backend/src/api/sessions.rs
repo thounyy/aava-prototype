@@ -76,6 +76,11 @@ struct EnclaveCloseSessionResponse {
     status: String,
 }
 
+fn enclave_internal_token() -> Result<String, EnclaveError> {
+    env::var("ENCLAVE_INTERNAL_TOKEN")
+        .map_err(|_| EnclaveError::ParseError("Missing ENCLAVE_INTERNAL_TOKEN".into()))
+}
+
 async fn open_session(
     Path((viewer_identifier, stream_id)): Path<(String, String)>,
 ) -> Result<Json<OpenSessionResponse>, AppError> {
@@ -86,6 +91,7 @@ async fn open_session(
 
     let enclave_url =
         env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let token = enclave_internal_token()?;
 
     let request_body = serde_json::json!({
         "viewer_id": viewer_identifier,
@@ -94,7 +100,8 @@ async fn open_session(
 
     let client = reqwest::Client::new();
     let response = client
-        .post(&format!("{}/open_session", enclave_url))
+        .post(&format!("{}/internal/v1/sessions/open", enclave_url))
+        .header("X-Internal-Token", token)
         .json(&request_body)
         .send()
         .await
@@ -143,6 +150,7 @@ async fn close_session(
 
     let enclave_url =
         env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let token = enclave_internal_token()?;
 
     let request_body = serde_json::json!({
         "session_id": session_id,
@@ -150,7 +158,8 @@ async fn close_session(
 
     let client = reqwest::Client::new();
     let response = client
-        .post(&format!("{}/close_session", enclave_url))
+        .post(&format!("{}/internal/v1/sessions/close", enclave_url))
+        .header("X-Internal-Token", token)
         .json(&request_body)
         .send()
         .await

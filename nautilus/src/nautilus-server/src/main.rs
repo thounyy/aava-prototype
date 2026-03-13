@@ -10,12 +10,13 @@ use nautilus_server::AppState;
 use redis::aio::ConnectionManager;
 use redis::Client;
 use std::sync::Arc;
-use tower_http::cors::{Any, CorsLayer};
 use tracing::{info, warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {    
     let eph_kp = Ed25519KeyPair::generate(&mut rand::thread_rng());
+    let _internal_token = std::env::var("ENCLAVE_INTERNAL_TOKEN")
+        .map_err(|_| anyhow::anyhow!("ENCLAVE_INTERNAL_TOKEN must be defined"))?;
 
     // Initialize Redis connection
     let redis_url =
@@ -27,8 +28,6 @@ async fn main() -> Result<()> {
     // Authenticate with Redis
     // Priority: REDIS_PASSWORD env var > password in URL
     // REDIS_PASSWORD is more secure (doesn't show in process list)
-    use redis::AsyncCommands;
-
     if let Ok(password) = std::env::var("REDIS_PASSWORD") {
         if !password.is_empty() {
             let _: String = redis::cmd("AUTH")
@@ -66,21 +65,20 @@ async fn main() -> Result<()> {
 
     let state = Arc::new(AppState { eph_kp, redis });
 
-    // Define your own restricted CORS policy here if needed.
-    let cors = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+    let internal_routes = Router::new()
+        .route("/sessions/open", post(open_session))
+        .route("/sessions/close", post(close_session))
+        .route("/streams/end", post(end_stream))
+        .route("/streams/cleanup", post(cleanup_stream));
 
     let app = Router::new()
         .route("/", get(ping))
         .route("/get_attestation", get(get_attestation))
         .route("/health_check", get(health_check))
-        .route("/open_session", post(open_session))
-        .route("/close_session", post(close_session))
-        .route("/end_stream", post(end_stream))
-        .route("/cleanup_stream", post(cleanup_stream))
-        .with_state(state)
-        .layer(cors);
+        .nest("/internal/v1", internal_routes)
+        .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000").await?;
     info!("listening on {}", listener.local_addr().unwrap());
     axum::serve(listener, app.into_make_service())
         .await

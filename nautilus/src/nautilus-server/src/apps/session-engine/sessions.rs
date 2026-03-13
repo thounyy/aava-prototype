@@ -3,6 +3,8 @@
 
 use crate::AppState;
 use crate::EnclaveError;
+use crate::require_internal_auth;
+use axum::http::HeaderMap;
 use axum::extract::State;
 use axum::Json;
 use redis::AsyncCommands;
@@ -44,8 +46,10 @@ pub struct CloseSessionResponse {
 /// Generates session ID and writes to Redis
 pub async fn open_session(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<OpenSessionRequest>,
 ) -> Result<Json<OpenSessionResponse>, EnclaveError> {
+    require_internal_auth(&headers)?;
     info!(
         "Creating session for viewer {} on stream {}",
         request.viewer_id, request.stream_id
@@ -106,8 +110,10 @@ pub async fn open_session(
 /// Updates session status to 'completed' in Redis
 pub async fn close_session(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<CloseSessionRequest>,
 ) -> Result<Json<CloseSessionResponse>, EnclaveError> {
+    require_internal_auth(&headers)?;
     let session_id_str = &request.session_id;
     let session_id = Uuid::parse_str(session_id_str)
         .map_err(|e| EnclaveError::GenericError(format!("Invalid session ID: {}", e)))?;

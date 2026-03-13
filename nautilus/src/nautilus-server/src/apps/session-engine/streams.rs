@@ -4,7 +4,9 @@
 use crate::common::{to_signed_response, IntentMessage, IntentScope, ProcessedDataResponse};
 use crate::AppState;
 use crate::EnclaveError;
+use crate::require_internal_auth;
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::Json;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
@@ -66,8 +68,10 @@ pub struct SessionData {
 /// Only the enclave interacts with Redis, ensuring the dataset is proven.
 pub async fn end_stream(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<EndStreamRequest>,
 ) -> Result<Json<ProcessedDataResponse<IntentMessage<EndStreamResponse>>>, EnclaveError> {
+    require_internal_auth(&headers)?;
     info!(
         "Ending stream {} - querying sessions from Redis",
         request.stream_id
@@ -184,8 +188,10 @@ pub async fn end_stream(
 /// Deletes all sessions for a stream from Redis
 pub async fn cleanup_stream(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<CleanupStreamRequest>,
 ) -> Result<Json<serde_json::Value>, EnclaveError> {
+    require_internal_auth(&headers)?;
     info!("Cleaning up sessions for stream {}", request.stream_id);
 
     let mut redis = state.redis.clone();
