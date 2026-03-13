@@ -19,11 +19,11 @@ use crate::AppState;
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/api/viewers/:viewer_identifier/streams/:stream_id/sessions",
+            "/api/viewers/{viewer_identifier}/streams/{stream_id}/sessions",
             post(open_session),
         )
         .route(
-            "/api/viewers/:viewer_identifier/sessions/:session_id/close",
+            "/api/viewers/{viewer_identifier}/sessions/{session_id}/close",
             post(close_session),
         )
 }

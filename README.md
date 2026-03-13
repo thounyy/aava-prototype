@@ -37,21 +37,35 @@ Aava is a programmable video layer that leverages AI-powered compression and dec
 
 ## Run locally
 
+### Pre-flight checklist
+
+Before starting backend and enclave:
+
+1. **Start Redis with a password** – Redis must use `requirepass` so the enclave can authenticate:
+   ```bash
+   # One-off with password
+   redis-server --requirepass your-secure-password
+
+   # Or add to redis.conf: requirepass your-secure-password
+   ```
+
+2. **Set environment variables** – Both backend and enclave need `ENCLAVE_INTERNAL_TOKEN`. Enclave also needs `REDIS_PASSWORD` (must match Redis's `requirepass`).
+
+3. **Start order**: Redis → Enclave → Backend
+
 ### 1. Run Redis
 
 ```bash
-# Start Redis
-redis-server
-# Test Redis connection
-redis-cli ping
-# Should return: PONG
+redis-server --requirepass your-secure-password
+# Test: redis-cli -a your-secure-password ping  → PONG
 ```
 
 ### 2. Run the Enclave
 
 ```bash
 cd nautilus/src/nautilus-server
-# Run the enclave
+export ENCLAVE_INTERNAL_TOKEN=your-shared-secret
+export REDIS_PASSWORD=your-secure-password   # Same as Redis requirepass
 RUST_LOG=info cargo run --bin nautilus-server
 ```
 
@@ -59,7 +73,7 @@ RUST_LOG=info cargo run --bin nautilus-server
 
 ```bash
 cd backend
-# Run the backend
+export ENCLAVE_INTERNAL_TOKEN=your-shared-secret   # Must match enclave
 RUST_LOG=info cargo run
 ```
 
@@ -95,8 +109,8 @@ curl -X POST "http://127.0.0.1:8080/api/viewers/<VIEWER_IDENTIFIER>/sessions/<SE
 ### 4. Verify Redis Sessions
 
 ```bash
-# Connect to Redis (with password)
-redis-cli -a your-password
+# Connect to Redis (use same password as REDIS_PASSWORD)
+redis-cli -a your-secure-password
 
 # Check all session keys
 KEYS session:*

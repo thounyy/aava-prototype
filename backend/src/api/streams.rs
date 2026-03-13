@@ -26,11 +26,11 @@ pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024;
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/api/creators/:account_identifier/streams",
+            "/api/creators/{account_identifier}/streams",
             post(start_stream),
         )
         .route(
-            "/api/creators/:account_identifier/streams/:stream_id/end",
+            "/api/creators/{account_identifier}/streams/{stream_id}/end",
             post(end_stream),
         )
 }

@@ -16,11 +16,11 @@ use crate::AppState;
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/api/creators/:account_identifier",
+            "/api/creators/{account_identifier}",
             post(create_creator_account),
         )
         .route(
-            "/api/viewers/:account_identifier",
+            "/api/viewers/{account_identifier}",
             post(create_viewer_account),
         )
 }
