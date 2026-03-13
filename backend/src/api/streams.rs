@@ -58,7 +58,7 @@ async fn start_stream(
     State(state): State<Arc<AppState>>,
     Path(account_identifier): Path<String>,
 ) -> Result<Json<StreamStartResponse>, AppError> {
-    let account_id = sui::ids::derive_account_id(&account_identifier)?;
+    let account_id = sui::read::derive_account_id(&account_identifier)?;
     info!(
         "Creating stream for account_identifier {} (derived account {})",
         account_identifier, account_id
@@ -88,7 +88,7 @@ async fn end_stream(
     State(state): State<Arc<AppState>>,
     Path((account_identifier, stream_id)): Path<(String, String)>,
 ) -> Result<Json<StreamEndResponse>, AppError> {
-    let account_id = sui::ids::derive_account_id(&account_identifier)?;
+    let account_id = sui::read::derive_account_id(&account_identifier)?;
     info!(
         "Ending stream {} for account_identifier {} (derived account {})",
         stream_id, account_identifier, account_id

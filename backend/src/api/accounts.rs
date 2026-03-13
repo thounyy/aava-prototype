@@ -36,7 +36,7 @@ async fn create_creator_account(
     Path(account_identifier): Path<String>,
 ) -> Result<Json<CreateCreatorAccountResponse>, AppError> {
     info!("Creating creator account for identifier {}", account_identifier);
-    let account_id = sui::ids::derive_account_id(&account_identifier)?;
+    let account_id = sui::read::derive_account_id(&account_identifier)?;
 
     let tx = sui::creator::build_create_account_tx(
         state.sui_client.clone(),
@@ -64,7 +64,7 @@ async fn create_viewer_account(
 ) -> Result<Json<CreateViewerAccountResponse>, AppError> {
     info!("Creating viewer account for identifier {}", account_identifier);
     // TODO: call viewer::new_account, get the account object id from the tx effects
-    let account_id = sui::ids::derive_account_id(&account_identifier)?;
+    let account_id = sui::read::derive_account_id(&account_identifier)?;
     Ok(Json(CreateViewerAccountResponse {
         account_identifier,
         account_id: account_id.to_string(),
