@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
+use axum::{extract::State, response::Json, routing::post, Router};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
+use crate::error::AppError;
 use crate::sui;
 use crate::AppState;
 
@@ -26,7 +27,7 @@ pub struct CreateCreatorAccountResponse {
 async fn create_creator_account(
     State(state): State<Arc<AppState>>,
     Json(request): Json<CreateCreatorAccountRequest>,
-) -> Result<Json<CreateCreatorAccountResponse>, (StatusCode, String)> {
+) -> Result<Json<CreateCreatorAccountResponse>, AppError> {
     info!("Creating creator account for user {}", request.user_handle);
 
     let tx = sui::creator::build_create_account_tx(
@@ -45,7 +46,7 @@ async fn create_creator_account(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateViewerAccountRequest {
-    pub user_handle: String, // to define (could be platform user id)
+    pub user_handle: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,9 +57,8 @@ pub struct CreateViewerAccountResponse {
 
 async fn create_viewer_account(
     Json(request): Json<CreateViewerAccountRequest>,
-) -> Result<Json<CreateViewerAccountResponse>, (StatusCode, String)> {
+) -> Result<Json<CreateViewerAccountResponse>, AppError> {
     info!("Creating account for user {}", request.user_handle);
-
     // TODO: call viewer::new_account, get the account object id from the tx effects
     todo!()
 }

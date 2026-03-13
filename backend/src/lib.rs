@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 pub mod api;
 pub mod enclave;
+pub mod error;
 pub mod sui;
 pub mod walrus;
 

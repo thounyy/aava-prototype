@@ -1,13 +1,13 @@
 use std::num::NonZeroU16;
 
-use axum::http::StatusCode;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_bytes::ByteBuf;
 use tracing::{error, info};
 use walrus_core::EncodingType;
 
-// Enclave response types for deserializing the signed session data
+use crate::enclave::error::EnclaveError;
+
 #[derive(Debug, Deserialize)]
 struct EnclaveEndStreamResponse {
     response: EnclaveIntentMessage,
@@ -43,118 +43,82 @@ pub struct EnclaveSessionData {
     pub created_at: String,
 }
 
+fn enclave_url() -> String {
+    std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string())
+}
+
 /// Fetch attested session data from the enclave.
 ///
 /// Returns (data, signature, timestamp_ms).
 pub async fn fetch_signed_dataset(
     stream_id: &str,
     n_shards: u16,
-) -> Result<(EnclaveStreamData, String, u64), (StatusCode, String)> {
-    let enclave_url =
-        std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-
+) -> Result<(EnclaveStreamData, String, u64), EnclaveError> {
+    let url = enclave_url();
     let client = reqwest::Client::new();
     let response = client
-        .post(&format!("{}/end_stream", enclave_url))
+        .post(format!("{url}/end_stream"))
         .json(&serde_json::json!({ "stream_id": stream_id, "n_shards": n_shards }))
         .send()
-        .await
-        .map_err(|e| {
-            error!("Failed to connect to enclave at {}: {}", enclave_url, e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("TEE connection error: {}", e),
-            )
-        })?;
+        .await?;
 
     if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
+        let status = response.status().as_u16();
+        let body = response
             .text()
             .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        error!("Enclave returned error status {}: {}", status, error_text);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE error: HTTP {} - {}", status, error_text),
-        ));
+            .unwrap_or_else(|_| "Unknown error".into());
+        error!("Enclave returned error {status}: {body}");
+        return Err(EnclaveError::ApiError { status, body });
     }
 
-    let enclave_response: EnclaveEndStreamResponse = response.json().await.map_err(|e| {
-        error!("Failed to parse enclave response: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE response parsing error: {}", e),
-        )
+    let parsed: EnclaveEndStreamResponse = response.json().await.map_err(|e| {
+        error!("Failed to parse enclave response: {e}");
+        EnclaveError::ParseError(e.to_string())
     })?;
 
     info!(
-        "Received {} sessions for stream {} from enclave with attestation (blob_id: {}, signature: {})",
-        enclave_response.response.data.sessions_count,
-        enclave_response.response.data.stream_id,
-        URL_SAFE_NO_PAD.encode(enclave_response.response.data.blob_id.as_ref()),
-        &enclave_response.signature[..16],
+        "Received {} sessions for stream {} from enclave (blob_id: {}, sig: {}...)",
+        parsed.response.data.sessions_count,
+        parsed.response.data.stream_id,
+        URL_SAFE_NO_PAD.encode(parsed.response.data.blob_id.as_ref()),
+        &parsed.signature[..16.min(parsed.signature.len())],
     );
 
     Ok((
-        enclave_response.response.data,
-        enclave_response.signature,
-        enclave_response.response.timestamp_ms,
+        parsed.response.data,
+        parsed.signature,
+        parsed.response.timestamp_ms,
     ))
 }
 
 /// Cleanup stream data from Redis after successful Walrus upload.
-pub async fn cleanup_dataset(stream_id: &str) -> Result<(), (StatusCode, String)> {
-    let enclave_url =
-        std::env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-
-    let request_body = serde_json::json!({
-        "stream_id": stream_id,
-    });
-
+pub async fn cleanup_dataset(stream_id: &str) -> Result<(), EnclaveError> {
+    let url = enclave_url();
     let client = reqwest::Client::new();
     let response = client
-        .post(&format!("{}/cleanup_stream", enclave_url))
-        .json(&request_body)
+        .post(format!("{url}/cleanup_stream"))
+        .json(&serde_json::json!({ "stream_id": stream_id }))
         .send()
-        .await
-        .map_err(|e| {
-            error!("Failed to connect to enclave for cleanup: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("TEE connection error: {}", e),
-            )
-        })?;
+        .await?;
 
     if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
+        let status = response.status().as_u16();
+        let body = response
             .text()
             .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        error!(
-            "Enclave cleanup returned error status {}: {}",
-            status, error_text
-        );
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE cleanup error: HTTP {} - {}", status, error_text),
-        ));
+            .unwrap_or_else(|_| "Unknown error".into());
+        error!("Enclave cleanup returned error {status}: {body}");
+        return Err(EnclaveError::ApiError { status, body });
     }
 
     let cleanup_response: serde_json::Value = response.json().await.map_err(|e| {
-        error!("Failed to parse cleanup response: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE response parsing error: {}", e),
-        )
+        error!("Failed to parse cleanup response: {e}");
+        EnclaveError::ParseError(e.to_string())
     })?;
 
     let deleted_count = cleanup_response["deleted_count"].as_u64().unwrap_or(0);
-    info!(
-        "Cleaned up {} stream data from Redis for stream {}",
-        deleted_count, stream_id
-    );
+    info!("Cleaned up {deleted_count} Redis entries for stream {stream_id}");
 
     Ok(())
 }

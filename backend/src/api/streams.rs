@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
+use axum::{extract::State, response::Json, routing::post, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use rand::RngExt;
@@ -10,6 +10,7 @@ use sui_sdk_types::Address;
 use tracing::{info, warn};
 
 use crate::enclave;
+use crate::error::AppError;
 use crate::sui;
 use crate::walrus;
 use crate::AppState;
@@ -55,15 +56,13 @@ pub struct StreamEndResponse {
 async fn start_stream(
     State(state): State<Arc<AppState>>,
     Json(request): Json<StreamStartRequest>,
-) -> Result<Json<StreamStartResponse>, (StatusCode, String)> {
+) -> Result<Json<StreamStartResponse>, AppError> {
     info!("Creating stream for account {}", request.account_id);
 
-    let account_id: Address = request.account_id.parse().map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid account_id `{}`: {e}", request.account_id),
-        )
-    })?;
+    let account_id: Address = request
+        .account_id
+        .parse()
+        .map_err(|e| AppError::BadRequest(format!("Invalid account_id: {e}")))?;
 
     let tx = sui::creator::build_create_stream_tx(
         state.sui_client.clone(),
@@ -79,8 +78,6 @@ async fn start_stream(
     }))
 }
 
-/// Single endpoint that replaces the old init + finalize two-step flow.
-///
 /// 1. Fetch attested session data from enclave
 /// 2. Build, sign & execute the verify_and_store_blob tx
 /// 3. Upload blob payload to Walrus relay
@@ -89,19 +86,16 @@ async fn start_stream(
 async fn end_stream(
     State(state): State<Arc<AppState>>,
     Json(request): Json<StreamEndRequest>,
-) -> Result<Json<StreamEndResponse>, (StatusCode, String)> {
+) -> Result<Json<StreamEndResponse>, AppError> {
     info!("Ending stream {} for account {}", request.stream_id, request.account_id);
 
-    let account_id: Address = request.account_id.parse().map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid account_id `{}`: {e}", request.account_id),
-        )
-    })?;
+    let account_id: Address = request
+        .account_id
+        .parse()
+        .map_err(|e| AppError::BadRequest(format!("Invalid account_id: {e}")))?;
 
     // ── 1. Fetch Walrus system params ───────────────────────────────
-    let walrus_params =
-        sui::read::fetch_walrus_system_params(state.sui_client.clone()).await?;
+    let walrus_params = sui::read::fetch_walrus_system_params(state.sui_client.clone()).await?;
 
     // ── 2. Fetch attested sessions from enclave ─────────────────────
     let (data, signature, timestamp_ms) =
@@ -120,21 +114,13 @@ async fn end_stream(
 
     // ── 3. Prepare payload & tip ────────────────────────────────────
     let payload = serde_json::to_vec(&data.sessions).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize Walrus payload: {e}"),
-        )
+        AppError::Internal(format!("Failed to serialize Walrus payload: {e}"))
     })?;
 
     let price_for_encoded_length =
-        data.encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * walrus_params.price_per_unit_size * 53u64;
+        data.encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * walrus_params.price_per_unit_size * 53;
 
-    let tip_config = walrus::tip::fetch_tip_config().await.map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("Failed to fetch upload relay tip config: {e}"),
-        )
-    })?;
+    let tip_config = walrus::tip::fetch_tip_config().await?;
 
     let (auth_payload, tip_payment, nonce_b64) = match &tip_config {
         walrus::tip::TipConfigResponse::SendTip(config) => {
@@ -149,18 +135,15 @@ async fn end_stream(
 
             let tip_amount = match &config.kind {
                 walrus::tip::TipKind::Const(v) => *v,
-                walrus::tip::TipKind::Linear {
-                    base,
-                    per_encoded_kib,
-                } => base + per_encoded_kib * data.encoded_size.div_ceil(1024),
+                walrus::tip::TipKind::Linear { base, per_encoded_kib } => {
+                    base + per_encoded_kib * data.encoded_size.div_ceil(1024)
+                }
             };
 
-            let tip_address: Address = config.address.parse().map_err(|e| {
-                (
-                    StatusCode::BAD_GATEWAY,
-                    format!("Invalid tip address from relay: {e}"),
-                )
-            })?;
+            let tip_address: Address = config
+                .address
+                .parse()
+                .map_err(|e| AppError::BadRequest(format!("Invalid tip address: {e}")))?;
 
             (
                 Some(auth),
@@ -205,11 +188,8 @@ async fn end_stream(
     );
 
     // ── 5. Find the Blob object from tx effects ─────────────────────
-    let blob_object_id = find_blob_object_id(
-        state.sui_client.clone(),
-        &register_result.digest,
-    )
-    .await?;
+    let blob_object_id =
+        find_blob_object_id(state.sui_client.clone(), &register_result.digest).await?;
 
     let blob_id_b64 = URL_SAFE_NO_PAD.encode(&data.blob_id);
 
@@ -236,8 +216,8 @@ async fn end_stream(
         }
         Err(e) => {
             warn!(
-                "Walrus upload failed after successful tx {} for stream {}: {}",
-                register_result.digest, request.stream_id, e
+                "Walrus upload failed after successful tx {} for stream {}: {e}",
+                register_result.digest, request.stream_id,
             );
             let tx = sui::creator::build_destroy_blob_tx(
                 state.sui_client.clone(),
@@ -271,11 +251,11 @@ async fn end_stream(
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/// Query the executed tx to extract the created/mutated Blob object ID.
+/// Extract the Blob object ID from the effects of an executed tx.
 async fn find_blob_object_id(
     client: Arc<sui_rpc::Client>,
     tx_digest: &str,
-) -> Result<String, (StatusCode, String)> {
+) -> Result<String, AppError> {
     use sui_rpc::field::{FieldMask, FieldMaskUtil};
     use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
 
@@ -290,10 +270,7 @@ async fn find_blob_object_id(
         .get_transaction(request)
         .await
         .map_err(|e| {
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("Failed to fetch tx {tx_digest}: {e}"),
-            )
+            sui::error::SuiError::RpcError(format!("Failed to fetch tx {tx_digest}: {e}"))
         })?;
 
     let tx = response.into_inner().transaction().clone();
@@ -303,9 +280,6 @@ async fn find_blob_object_id(
         .find(|obj| obj.object_type().contains("Blob"))
         .map(|obj| obj.object_id().to_string())
         .ok_or_else(|| {
-            (
-                StatusCode::BAD_GATEWAY,
-                format!("No Blob object found in tx {tx_digest}"),
-            )
+            AppError::Internal(format!("No Blob object found in tx {tx_digest}"))
         })
 }

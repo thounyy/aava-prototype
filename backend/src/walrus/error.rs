@@ -5,7 +5,6 @@ use thiserror::Error;
 ///
 /// It encapsulates HTTP request errors, URL parsing errors, API-specific errors, response parsing errors, and other general errors.
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 pub enum WalrusError {
     /// An HTTP request failed.
     #[error("HTTP request failed: {0}")]

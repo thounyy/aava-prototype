@@ -1,16 +1,15 @@
 use std::{str::FromStr, sync::Arc};
 
-use axum::http::StatusCode;
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
 use sui_rpc::Client;
 use sui_sdk_types::{Address, StructTag, Transaction};
 use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder, intent::CoinWithBalance};
 
-use crate::walrus::blob::CertificateData;
-
 use crate::sui::constants::{
     AAVA_PACKAGE, ACCOUNT_REGISTRY, ENCLAVE_CONFIG, WALRUS_SYSTEM, WAL_COIN_TYPE,
 };
+use crate::sui::error::SuiError;
+use crate::walrus::blob::CertificateData;
 
 pub struct TipPayment {
     pub address: Address,
@@ -22,7 +21,7 @@ pub async fn build_create_account_tx(
     client: Arc<Client>,
     sender: Address,
     username: String,
-) -> Result<Transaction, (StatusCode, String)> {
+) -> Result<Transaction, SuiError> {
     let mut client = client.as_ref().clone();
     let mut builder = TransactionBuilder::new();
     builder.set_sender(sender);
@@ -40,19 +39,17 @@ pub async fn build_create_account_tx(
         vec![registry_arg, addr_arg, username_arg],
     );
 
-    builder.build(&mut client).await.map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to build start stream tx: {err}"),
-        )
-    })
+    builder
+        .build(&mut client)
+        .await
+        .map_err(|e| SuiError::BuildFailed(e.to_string()))
 }
 
 pub async fn build_create_stream_tx(
     client: Arc<Client>,
     sender: Address,
     account_id: Address,
-) -> Result<Transaction, (StatusCode, String)> {
+) -> Result<Transaction, SuiError> {
     let mut client = client.as_ref().clone();
     let mut builder = TransactionBuilder::new();
     builder.set_sender(sender);
@@ -67,12 +64,10 @@ pub async fn build_create_stream_tx(
         vec![account_arg],
     );
 
-    builder.build(&mut client).await.map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to build start stream tx: {err}"),
-        )
-    })
+    builder
+        .build(&mut client)
+        .await
+        .map_err(|e| SuiError::BuildFailed(e.to_string()))
 }
 
 pub async fn build_verify_and_store_blob_tx(
@@ -91,27 +86,21 @@ pub async fn build_verify_and_store_blob_tx(
     deletable: bool,
     auth_payload: Option<Vec<u8>>,
     tip_payment: Option<TipPayment>,
-) -> Result<Transaction, (StatusCode, String)> {
-    let mut client = client.as_ref().clone();
+) -> Result<Transaction, SuiError> {
     if blob_id.len() != 32 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Invalid blob_id length {}, expected 32 bytes",
-                blob_id.len()
-            ),
-        ));
+        return Err(SuiError::InvalidInput(format!(
+            "blob_id must be 32 bytes, got {}",
+            blob_id.len()
+        )));
     }
     if root_hash.len() != 32 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Invalid root_hash length {}, expected 32 bytes",
-                root_hash.len()
-            ),
-        ));
+        return Err(SuiError::InvalidInput(format!(
+            "root_hash must be 32 bytes, got {}",
+            root_hash.len()
+        )));
     }
 
+    let mut client = client.as_ref().clone();
     let mut builder = TransactionBuilder::new();
     builder.set_sender(sender);
 
@@ -120,18 +109,12 @@ pub async fn build_verify_and_store_blob_tx(
         let _auth_input = builder.pure_bytes(payload);
     }
 
-    let stream_id_addr: Address = stream_id.parse().map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid stream_id `{stream_id}` for Move `ID`: {e}"),
-        )
-    })?;
-    let signature_bytes = URL_SAFE_NO_PAD.decode(signature).map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid signature encoding, expected base64url: {e}"),
-        )
-    })?;
+    let stream_id_addr: Address = stream_id
+        .parse()
+        .map_err(|e| SuiError::InvalidInput(format!("Invalid stream_id `{stream_id}`: {e}")))?;
+    let signature_bytes = URL_SAFE_NO_PAD
+        .decode(signature)
+        .map_err(|e| SuiError::InvalidInput(format!("Invalid signature base64url: {e}")))?;
 
     let wal_struct_tag = StructTag::from_str(WAL_COIN_TYPE).unwrap();
     let coin_with_balance = CoinWithBalance::new(wal_struct_tag, payment_amount);
@@ -184,40 +167,25 @@ pub async fn build_verify_and_store_blob_tx(
         builder.transfer_objects(tip_coins, tip_recipient_arg);
     }
 
-    // builder.move_call(
-    //     Function::new(
-    //         SUI_PACKAGE.parse().unwrap(),
-    //         "coin".parse().unwrap(),
-    //         "destroy_zero".parse().unwrap(),
-    //     ),
-    //     vec![payment_arg],
-    // );
-
-    builder.build(&mut client).await.map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to build verify_and_store_blob tx: {err}"),
-        )
-    })
+    builder
+        .build(&mut client)
+        .await
+        .map_err(|e| SuiError::BuildFailed(e.to_string()))
 }
 
 /// Certify a blob on Sui after receiving a confirmation certificate from the upload relay.
-/// and add it to the streamer's account.
 pub async fn build_certify_blob_tx(
     client: Arc<Client>,
     sender: Address,
     account_id: Address,
     stream_id: &str,
     certificate: &CertificateData,
-) -> Result<Transaction, (StatusCode, String)> {
+) -> Result<Transaction, SuiError> {
     let mut client = client.as_ref().clone();
 
-    let stream_id_addr: Address = stream_id.parse().map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid stream_id `{stream_id}` for Move `ID`: {e}"),
-        )
-    })?;
+    let stream_id_addr: Address = stream_id
+        .parse()
+        .map_err(|e| SuiError::InvalidInput(format!("Invalid stream_id `{stream_id}`: {e}")))?;
     let signature = &certificate.signature;
     let signers_bitmap = signers_to_bitmap(&certificate.signers)?;
     let message = &certificate.serialized_message;
@@ -248,19 +216,16 @@ pub async fn build_certify_blob_tx(
         ],
     );
 
-    builder.build(&mut client).await.map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to build certify_blob tx: {err}"),
-        )
-    })
+    builder
+        .build(&mut client)
+        .await
+        .map_err(|e| SuiError::BuildFailed(e.to_string()))
 }
 
-fn signers_to_bitmap(signers: &[u16]) -> Result<Vec<u8>, (StatusCode, String)> {
+fn signers_to_bitmap(signers: &[u16]) -> Result<Vec<u8>, SuiError> {
     let Some(max_signer) = signers.iter().max().copied() else {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            "Confirmation certificate has no signers".to_string(),
+        return Err(SuiError::ParseError(
+            "Confirmation certificate has no signers".into(),
         ));
     };
     let mut bitmap = vec![0u8; usize::from(max_signer / 8 + 1)];
@@ -278,13 +243,10 @@ pub async fn build_destroy_blob_tx(
     sender: Address,
     account_id: Address,
     stream_id: &str,
-) -> Result<Transaction, (StatusCode, String)> {
-    let stream_id_addr: Address = stream_id.parse().map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid stream_id `{stream_id}` for Move `ID`: {e}"),
-        )
-    })?;
+) -> Result<Transaction, SuiError> {
+    let stream_id_addr: Address = stream_id
+        .parse()
+        .map_err(|e| SuiError::InvalidInput(format!("Invalid stream_id `{stream_id}`: {e}")))?;
     let mut client = client.as_ref().clone();
     let mut builder = TransactionBuilder::new();
     builder.set_sender(sender);
@@ -301,10 +263,8 @@ pub async fn build_destroy_blob_tx(
         vec![account_arg, system_arg, stream_id_arg],
     );
 
-    builder.build(&mut client).await.map_err(|err| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to build destroy_blob tx for stream {stream_id}: {err}"),
-        )
-    })
+    builder
+        .build(&mut client)
+        .await
+        .map_err(|e| SuiError::BuildFailed(format!("destroy_blob for {stream_id}: {e}")))
 }
