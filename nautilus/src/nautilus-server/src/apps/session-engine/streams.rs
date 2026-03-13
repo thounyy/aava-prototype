@@ -83,7 +83,7 @@ pub async fn end_stream(
     // Get all session IDs for this stream
     let session_ids: Vec<String> = redis.smembers(&stream_sessions_key).await.map_err(|e| {
         error!("Redis error querying stream sessions: {}", e);
-        EnclaveError::GenericError(format!("Failed to query sessions: {}", e))
+        EnclaveError::RedisError(format!("Failed to query sessions: {}", e))
     })?;
 
     let sessions_count = session_ids.len() as u64;
@@ -93,7 +93,7 @@ pub async fn end_stream(
     );
 
     if session_ids.is_empty() {
-        return Err(EnclaveError::GenericError(format!(
+        return Err(EnclaveError::NotFound(format!(
             "No sessions found for stream {}",
             request.stream_id
         )));
@@ -105,12 +105,12 @@ pub async fn end_stream(
         let session_key = format!("session:{}", session_id);
         let session_json: Option<String> = redis.get(&session_key).await.map_err(|e| {
             error!("Redis error reading session {}: {}", session_id, e);
-            EnclaveError::GenericError(format!("Failed to read session {}: {}", session_id, e))
+            EnclaveError::RedisError(format!("Failed to read session {}: {}", session_id, e))
         })?;
 
         if let Some(json) = session_json {
             let session_value: serde_json::Value = serde_json::from_str(&json).map_err(|e| {
-                EnclaveError::GenericError(format!(
+                EnclaveError::ParseError(format!(
                     "Failed to parse session data for {}: {}",
                     session_id, e
                 ))
@@ -145,10 +145,10 @@ pub async fn end_stream(
 
     // Serialize session data and compute Walrus blob metadata for verification.
     let data_json = serde_json::to_string(&sessions)
-        .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize sessions: {}", e)))?;
+        .map_err(|e| EnclaveError::ParseError(format!("Failed to serialize sessions: {}", e)))?;
     let walrus_metadata =
         compute_walrus_metadata(request.n_shards, data_json.as_bytes()).map_err(|e| {
-            EnclaveError::GenericError(format!("Failed to compute Walrus blob id: {}", e))
+            EnclaveError::WalrusError(format!("Failed to compute Walrus blob id: {}", e))
         })?;
 
     let response_data = EndStreamResponse {
@@ -200,7 +200,7 @@ pub async fn cleanup_stream(
     // Get all session IDs for this stream
     let session_ids: Vec<String> = redis.smembers(&stream_sessions_key).await.map_err(|e| {
         error!("Redis error querying stream sessions: {}", e);
-        EnclaveError::GenericError(format!("Failed to query sessions: {}", e))
+        EnclaveError::RedisError(format!("Failed to query sessions: {}", e))
     })?;
 
     if session_ids.is_empty() {
@@ -221,7 +221,7 @@ pub async fn cleanup_stream(
         let session_key = format!("session:{}", session_id);
         let deleted: bool = redis.del(&session_key).await.map_err(|e| {
             error!("Redis error deleting session {}: {}", session_id, e);
-            EnclaveError::GenericError(format!("Failed to delete session {}: {}", session_id, e))
+            EnclaveError::RedisError(format!("Failed to delete session {}: {}", session_id, e))
         })?;
         if deleted {
             deleted_count += 1;
@@ -231,7 +231,7 @@ pub async fn cleanup_stream(
     // Delete the stream sessions set
     let _: () = redis.del(&stream_sessions_key).await.map_err(|e| {
         error!("Redis error deleting stream sessions set: {}", e);
-        EnclaveError::GenericError(format!("Failed to delete stream sessions set: {}", e))
+        EnclaveError::RedisError(format!("Failed to delete stream sessions set: {}", e))
     })?;
 
     info!(

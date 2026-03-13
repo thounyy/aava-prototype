@@ -77,7 +77,7 @@ pub async fn open_session(
     // TTL: 24 hours (86400 seconds) as safety net
     let session_key = format!("session:{}", session_id);
     let session_json = serde_json::to_string(&session_data)
-        .map_err(|e| EnclaveError::GenericError(format!("Failed to serialize session: {}", e)))?;
+        .map_err(|e| EnclaveError::ParseError(format!("Failed to serialize session: {}", e)))?;
 
     // Add session to stream's session set
     let stream_sessions_key = format!("stream:{}:sessions", request.stream_id);
@@ -93,7 +93,7 @@ pub async fn open_session(
 
     let _: () = pipe.query_async(&mut redis).await.map_err(|e| {
         error!("Redis error creating session: {}", e);
-        EnclaveError::GenericError(format!("Failed to create session: {}", e))
+        EnclaveError::RedisError(format!("Failed to create session: {}", e))
     })?;
 
     info!("Session {} created successfully in Redis", session_id);
@@ -116,7 +116,7 @@ pub async fn close_session(
     require_internal_auth(&headers)?;
     let session_id_str = &request.session_id;
     let session_id = Uuid::parse_str(session_id_str)
-        .map_err(|e| EnclaveError::GenericError(format!("Invalid session ID: {}", e)))?;
+        .map_err(|e| EnclaveError::InvalidInput(format!("Invalid session ID: {}", e)))?;
 
     info!("Closing session {}", session_id);
 
@@ -126,15 +126,15 @@ pub async fn close_session(
     // Get existing session data
     let session_json: Option<String> = redis.get(&session_key).await.map_err(|e| {
         error!("Redis error reading session: {}", e);
-        EnclaveError::GenericError(format!("Failed to read session: {}", e))
+        EnclaveError::RedisError(format!("Failed to read session: {}", e))
     })?;
 
     let session_data: serde_json::Value = match session_json {
         Some(json) => serde_json::from_str(&json).map_err(|e| {
-            EnclaveError::GenericError(format!("Failed to parse session data: {}", e))
+            EnclaveError::ParseError(format!("Failed to parse session data: {}", e))
         })?,
         None => {
-            return Err(EnclaveError::GenericError(format!(
+            return Err(EnclaveError::NotFound(format!(
                 "Session {} not found",
                 session_id
             )));
@@ -147,13 +147,13 @@ pub async fn close_session(
     updated_data["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
 
     let updated_json = serde_json::to_string(&updated_data).map_err(|e| {
-        EnclaveError::GenericError(format!("Failed to serialize updated session: {}", e))
+        EnclaveError::ParseError(format!("Failed to serialize updated session: {}", e))
     })?;
 
     // Update session in Redis
     let _: () = redis.set(&session_key, &updated_json).await.map_err(|e| {
         error!("Redis error updating session: {}", e);
-        EnclaveError::GenericError(format!("Failed to close session: {}", e))
+        EnclaveError::RedisError(format!("Failed to close session: {}", e))
     })?;
 
     info!("Session {} closed successfully", session_id);

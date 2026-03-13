@@ -118,7 +118,7 @@ pub async fn get_attestation(
         }
         _ => {
             driver::nsm_exit(fd);
-            Err(EnclaveError::GenericError(
+            Err(EnclaveError::AttestationError(
                 "unexpected response".to_string(),
             ))
         }
@@ -145,7 +145,7 @@ pub async fn health_check(
     let client = Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
-        .map_err(|e| EnclaveError::GenericError(format!("Failed to create HTTP client: {e}")))?;
+        .map_err(|e| EnclaveError::HttpError(format!("Failed to create HTTP client: {e}")))?;
 
     // Load allowed endpoints from YAML file
     let endpoints_status = match std::fs::read_to_string("allowed_endpoints.yaml") {
