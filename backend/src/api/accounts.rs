@@ -16,11 +16,11 @@ use crate::AppState;
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/api/creators/{account_identifier}",
+            "/api/creators/{account_handle}",
             post(create_creator_account),
         )
         .route(
-            "/api/viewers/{account_identifier}",
+            "/api/viewers/{account_handle}",
             post(create_viewer_account),
         )
 }
@@ -33,15 +33,15 @@ pub struct CreateCreatorAccountResponse {
 
 async fn create_creator_account(
     State(state): State<Arc<AppState>>,
-    Path(account_identifier): Path<String>,
+    Path(account_handle): Path<String>,
 ) -> Result<Json<CreateCreatorAccountResponse>, AppError> {
-    info!("Creating creator account for identifier {}", account_identifier);
-    let account_id = sui::read::derive_account_id(&account_identifier)?;
+    info!("Creating creator account for identifier {}", account_handle);
+    let account_id = sui::read::derive_account_id(&account_handle)?;
 
     let tx = sui::creator::build_create_account_tx(
         state.sui_client.clone(),
         sui::executor::wallet_address(),
-        account_identifier,
+        account_handle,
     )
     .await?;
 
@@ -55,18 +55,18 @@ async fn create_creator_account(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateViewerAccountResponse {
-    pub account_identifier: String,
+    pub account_handle: String,
     pub account_id: String,
 }
 
 async fn create_viewer_account(
-    Path(account_identifier): Path<String>,
+    Path(account_handle): Path<String>,
 ) -> Result<Json<CreateViewerAccountResponse>, AppError> {
-    info!("Creating viewer account for identifier {}", account_identifier);
+    info!("Creating viewer account for identifier {}", account_handle);
     // TODO: call viewer::new_account, get the account object id from the tx effects
-    let account_id = sui::read::derive_account_id(&account_identifier)?;
+    let account_id = sui::read::derive_account_id(&account_handle)?;
     Ok(Json(CreateViewerAccountResponse {
-        account_identifier,
+        account_handle,
         account_id: account_id.to_string(),
     }))
 }

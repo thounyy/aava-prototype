@@ -2,6 +2,6 @@ curl -X POST "http://127.0.0.1:8080/api/creators/thouny"
 
 curl -X POST "http://127.0.0.1:8080/api/creators/thouny/streams"
 
-curl -X POST "http://127.0.0.1:8080/api/viewers/viewer1/streams/0x345aea25bfe6877af48afaeb51017318f212b1e5180e3bf72d0d4426ae6e1be7/sessions"
+curl -X POST "http://127.0.0.1:8080/api/viewers/viewer1/streams/0x8696b85f0dad4cb1849192e26068550d96f0968ad112b65aa6849f36286bb92d/sessions"
 
-curl -X POST "http://127.0.0.1:8080/api/creators/thouny/streams/0x345aea25bfe6877af48afaeb51017318f212b1e5180e3bf72d0d4426ae6e1be7/end"
+curl -X POST "http://127.0.0.1:8080/api/creators/thouny/streams/0x8696b85f0dad4cb1849192e26068550d96f0968ad112b65aa6849f36286bb92d/end"

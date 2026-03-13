@@ -83,17 +83,17 @@ RUST_LOG=info cargo run
 
 ```bash
 # Create a creator account (tx is built, signed & executed server-side)
-curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_IDENTIFIER>"
+curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_HANDLE>"
 ```
 
 ### 2. Test streams
 
 ```bash
 # Start a stream
-curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_IDENTIFIER>/streams"
+curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_HANDLE>/streams"
   
 # End a stream (registers blob, uploads to Walrus, certifies — all server-side)
-curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_IDENTIFIER>/streams/<STREAM_ID>/end"
+curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_HANDLE>/streams/<STREAM_ID>/end"
 ```
 
 ### 3. Test sessions

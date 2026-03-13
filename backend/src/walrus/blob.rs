@@ -174,9 +174,7 @@ pub async fn upload_dataset(
     let signature_bytes = STANDARD
         .decode(&raw.confirmation_certificate.signature)
         .map_err(|e| {
-            WalrusError::ParseError(format!(
-                "Failed to decode certificate signature: {e}"
-            ))
+            WalrusError::ParseError(format!("Failed to decode certificate signature: {e}"))
         })?;
 
     Ok(UploadRelayResponse {

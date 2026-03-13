@@ -26,11 +26,11 @@ pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024;
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/api/creators/{account_identifier}/streams",
+            "/api/creators/{account_handle}/streams",
             post(start_stream),
         )
         .route(
-            "/api/creators/{account_identifier}/streams/{stream_id}/end",
+            "/api/creators/{account_handle}/streams/{stream_id}/end",
             post(end_stream),
         )
 }
@@ -56,12 +56,12 @@ pub struct StreamEndResponse {
 
 async fn start_stream(
     State(state): State<Arc<AppState>>,
-    Path(account_identifier): Path<String>,
+    Path(account_handle): Path<String>,
 ) -> Result<Json<StreamStartResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&account_identifier)?;
+    let account_id = sui::read::derive_account_id(&account_handle)?;
     info!(
-        "Creating stream for account_identifier {} (derived account {})",
-        account_identifier, account_id
+        "Creating stream for account_handle {} (derived account {})",
+        account_handle, account_id
     );
 
     let tx = sui::creator::build_create_stream_tx(
@@ -86,12 +86,12 @@ async fn start_stream(
 /// 5. Cleanup enclave state
 async fn end_stream(
     State(state): State<Arc<AppState>>,
-    Path((account_identifier, stream_id)): Path<(String, String)>,
+    Path((account_handle, stream_id)): Path<(String, String)>,
 ) -> Result<Json<StreamEndResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&account_identifier)?;
+    let account_id = sui::read::derive_account_id(&account_handle)?;
     info!(
-        "Ending stream {} for account_identifier {} (derived account {})",
-        stream_id, account_identifier, account_id
+        "Ending stream {} for account_handle {} (derived account {})",
+        stream_id, account_handle, account_id
     );
 
     // ── 1. Fetch Walrus system params ───────────────────────────────
