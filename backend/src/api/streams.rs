@@ -116,43 +116,7 @@ async fn end_stream(
     let price_for_encoded_length =
         data.encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * walrus_params.price_per_unit_size * 53;
 
-    let tip_config = walrus::tip::fetch_tip_config().await?;
-
-    let (auth_payload, tip_payment, nonce_b64) = match &tip_config {
-        walrus::tip::TipConfigResponse::SendTip(config) => {
-            let nonce: [u8; 32] = rand::rng().random();
-            let blob_digest = Sha256::digest(&payload);
-            let nonce_digest = Sha256::digest(&nonce);
-
-            let mut auth = Vec::with_capacity(72);
-            auth.extend_from_slice(&blob_digest);
-            auth.extend_from_slice(&nonce_digest);
-            auth.extend_from_slice(&(payload.len() as u64).to_le_bytes());
-
-            let tip_amount = match &config.kind {
-                walrus::tip::TipKind::Const(v) => *v,
-                walrus::tip::TipKind::Linear {
-                    base,
-                    per_encoded_kib,
-                } => base + per_encoded_kib * data.encoded_size.div_ceil(1024),
-            };
-
-            let tip_address: Address = config
-                .address
-                .parse()
-                .map_err(|e| AppError::BadRequest(format!("Invalid tip address: {e}")))?;
-
-            (
-                Some(auth),
-                Some(sui::creator::TipPayment {
-                    address: tip_address,
-                    amount: tip_amount,
-                }),
-                Some(URL_SAFE_NO_PAD.encode(nonce)),
-            )
-        }
-        walrus::tip::TipConfigResponse::NoTip => (None, None, None),
-    };
+    let tip_config = walrus::tip::get_tip_config(payload.clone(), data.encoded_size).await?;
 
     // ── 4. Build & execute verify_and_store_blob tx ─────────────────
     let sender = sui::executor::wallet_address();
@@ -171,8 +135,8 @@ async fn end_stream(
         data.encoding_type.into(),
         data.encoded_size,
         true,
-        auth_payload,
-        tip_payment,
+        tip_config.auth_payload,
+        tip_config.tip_payment,
     )
     .await?;
 
@@ -196,7 +160,7 @@ async fn end_stream(
         &blob_id_b64,
         payload,
         Some(&register_result.digest),
-        nonce_b64.as_deref(),
+        tip_config.nonce_b64.as_deref(),
     )
     .await
     {

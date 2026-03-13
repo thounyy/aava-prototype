@@ -9,12 +9,7 @@ use crate::sui::constants::{
     AAVA_PACKAGE, ACCOUNT_REGISTRY, ENCLAVE_CONFIG, WALRUS_SYSTEM, WAL_COIN_TYPE,
 };
 use crate::sui::error::SuiError;
-use crate::walrus::blob::CertificateData;
-
-pub struct TipPayment {
-    pub address: Address,
-    pub amount: u64,
-}
+use crate::walrus::{blob::CertificateData, tip::TipPayment};
 
 // TODO: modify for production
 pub async fn build_create_account_tx(
