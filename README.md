@@ -68,45 +68,30 @@ RUST_LOG=info cargo run
 ### 1. Test accounts 
 
 ```bash
-# Test creating a creator account - need to sign built tx and execute
+# Create a creator account (tx is built, signed & executed server-side)
 curl -X POST http://127.0.0.1:8080/api/accounts/creator/create \
   -H "Content-Type: application/json" \
   -d '{
-    "user_handle":"<USER_HANDLE>",
-    "sender":"<SUI_ADDRESS>"
+    "user_handle":"<USER_HANDLE>"
   }'
 ```
 
 ### 2. Test streams
 
 ```bash
-# Test starting a stream
+# Start a stream
 curl -X POST http://127.0.0.1:8080/api/streams/start \
   -H "Content-Type: application/json" \
   -d '{
-    "account_id":"<ACCOUNT_OBJECT_ID>",
-    "sender":"<SUI_ADDRESS>"
+    "account_id":"<ACCOUNT_OBJECT_ID>"
   }'
   
-# Test ending a stream (verify and store blob) - need to sign built tx and execute
-curl -X POST http://127.0.0.1:8080/api/streams/end/init \
+# End a stream (registers blob, uploads to Walrus, certifies — all server-side)
+curl -X POST http://127.0.0.1:8080/api/streams/end \
   -H "Content-Type: application/json" \
   -d '{
     "stream_id":"<STREAM_ID>",
-    "account_id":"<ACCOUNT_OBJECT_ID>",
-    "sender":"<SUI_ADDRESS>"
-  }'
-
-# Test ending a stream (certifying blob) - need to sign built tx and execute
-curl -X POST http://127.0.0.1:8080/api/streams/end/finalize \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stream_id":"<STREAM_ID>",
-    "account_id":"<ACCOUNT_OBJECT_ID>",
-    "sender":"<SUI_ADDRESS>",
-    "end_tx_digest":"<TX1_DIGEST>",
-    "blob_id_b64":"<FROM_INIT>",
-    "payload_b64":"<FROM_INIT>"
+    "account_id":"<ACCOUNT_OBJECT_ID>"
   }'
 ```
 
