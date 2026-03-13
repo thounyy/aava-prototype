@@ -26,6 +26,8 @@ public struct Account has key {
 
 // === Public functions ===
 
+// TODO: might have a registry per app later (managed by Creator?)
+
 public fun new_account(
     registry: &mut AccountRegistry,
     _: &ViewerAuth,

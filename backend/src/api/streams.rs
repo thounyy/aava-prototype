@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use axum::{extract::State, response::Json, routing::post, Router};
+use axum::{
+    extract::{Path, State},
+    response::Json,
+    routing::post,
+    Router,
+};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use rand::RngExt;
@@ -20,33 +25,29 @@ pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024;
 
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/streams/start", post(start_stream))
-        .route("/api/streams/end", post(end_stream))
+        .route(
+            "/api/creators/:account_identifier/streams",
+            post(start_stream),
+        )
+        .route(
+            "/api/creators/:account_identifier/streams/:stream_id/end",
+            post(end_stream),
+        )
 }
 
 // ── Request / Response types ────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamStartRequest {
-    pub account_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamStartResponse {
     pub tx_digest: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamEndRequest {
-    pub stream_id: String,
-    pub account_id: String,
+    pub stream_account_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamEndResponse {
     pub stream_id: String,
     pub sessions_count: u64,
-    pub register_tx_digest: String,
+    pub init_tx_digest: String,
     pub finalize_action: String,
     pub finalize_tx_digest: String,
 }
@@ -55,14 +56,13 @@ pub struct StreamEndResponse {
 
 async fn start_stream(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<StreamStartRequest>,
+    Path(account_identifier): Path<String>,
 ) -> Result<Json<StreamStartResponse>, AppError> {
-    info!("Creating stream for account {}", request.account_id);
-
-    let account_id: Address = request
-        .account_id
-        .parse()
-        .map_err(|e| AppError::BadRequest(format!("Invalid account_id: {e}")))?;
+    let account_id = sui::ids::derive_account_id(&account_identifier)?;
+    info!(
+        "Creating stream for account_identifier {} (derived account {})",
+        account_identifier, account_id
+    );
 
     let tx = sui::creator::build_create_stream_tx(
         state.sui_client.clone(),
@@ -75,6 +75,7 @@ async fn start_stream(
 
     Ok(Json(StreamStartResponse {
         tx_digest: result.digest,
+        stream_account_id: account_id.to_string(),
     }))
 }
 
@@ -85,28 +86,27 @@ async fn start_stream(
 /// 5. Cleanup enclave state
 async fn end_stream(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<StreamEndRequest>,
+    Path((account_identifier, stream_id)): Path<(String, String)>,
 ) -> Result<Json<StreamEndResponse>, AppError> {
-    info!("Ending stream {} for account {}", request.stream_id, request.account_id);
-
-    let account_id: Address = request
-        .account_id
-        .parse()
-        .map_err(|e| AppError::BadRequest(format!("Invalid account_id: {e}")))?;
+    let account_id = sui::ids::derive_account_id(&account_identifier)?;
+    info!(
+        "Ending stream {} for account_identifier {} (derived account {})",
+        stream_id, account_identifier, account_id
+    );
 
     // ── 1. Fetch Walrus system params ───────────────────────────────
     let walrus_params = sui::read::fetch_walrus_system_params(state.sui_client.clone()).await?;
 
     // ── 2. Fetch attested sessions from enclave ─────────────────────
     let (data, signature, timestamp_ms) =
-        enclave::stream::fetch_signed_dataset(&request.stream_id, walrus_params.n_shards).await?;
+        enclave::stream::fetch_signed_dataset(&stream_id, walrus_params.n_shards).await?;
 
     if data.sessions_count == 0 {
-        warn!("No active sessions found for stream {}", request.stream_id);
+        warn!("No active sessions found for stream {}", stream_id);
         return Ok(Json(StreamEndResponse {
-            stream_id: request.stream_id,
+            stream_id,
             sessions_count: 0,
-            register_tx_digest: String::new(),
+            init_tx_digest: String::new(),
             finalize_action: "noop".into(),
             finalize_tx_digest: String::new(),
         }));
@@ -165,7 +165,7 @@ async fn end_stream(
         sender,
         account_id,
         price_for_encoded_length,
-        &request.stream_id,
+        &stream_id,
         timestamp_ms,
         &signature,
         &data.blob_id,
@@ -184,7 +184,7 @@ async fn end_stream(
 
     info!(
         "Register blob tx executed for stream {}: {}",
-        request.stream_id, register_result.digest
+        stream_id, register_result.digest
     );
 
     // ── 5. Find the Blob object from tx effects ─────────────────────
@@ -208,7 +208,7 @@ async fn end_stream(
                 state.sui_client.clone(),
                 sender,
                 account_id,
-                &request.stream_id,
+                &stream_id,
                 &relay_response.certificate,
             )
             .await?;
@@ -217,13 +217,13 @@ async fn end_stream(
         Err(e) => {
             warn!(
                 "Walrus upload failed after successful tx {} for stream {}: {e}",
-                register_result.digest, request.stream_id,
+                register_result.digest, stream_id,
             );
             let tx = sui::creator::build_destroy_blob_tx(
                 state.sui_client.clone(),
                 sender,
                 account_id,
-                &request.stream_id,
+                &stream_id,
             )
             .await?;
             ("destroy_blob".to_string(), tx)
@@ -235,15 +235,15 @@ async fn end_stream(
 
     info!(
         "Finalize ({finalize_action}) tx executed for stream {}: {}",
-        request.stream_id, finalize_result.digest
+        stream_id, finalize_result.digest
     );
 
-    enclave::stream::cleanup_dataset(&request.stream_id).await?;
+    enclave::stream::cleanup_dataset(&stream_id).await?;
 
     Ok(Json(StreamEndResponse {
-        stream_id: request.stream_id,
+        stream_id,
         sessions_count: data.sessions_count,
-        register_tx_digest: register_result.digest,
+        init_tx_digest: register_result.digest,
         finalize_action,
         finalize_tx_digest: finalize_result.digest,
     }))

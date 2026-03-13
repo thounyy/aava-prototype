@@ -1,22 +1,7 @@
-curl -X POST http://127.0.0.1:8080/api/accounts/creator/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_handle":"thouny"
-  }'
+curl -X POST "http://127.0.0.1:8080/api/creators/thouny"
 
-curl -X POST http://127.0.0.1:8080/api/streams/start \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_id":"0x1d27e78d4ee956f4834806212ffd8c4fed8acb0501f5e7666372df0ff9f0ee09"
-  }'
+curl -X POST "http://127.0.0.1:8080/api/creators/thouny/streams"
 
-curl -X POST http://127.0.0.1:8080/api/sessions/open \
-  -H "Content-Type: application/json" \
-  -d '{"viewer_id":"viewer1","stream_id":"0x345aea25bfe6877af48afaeb51017318f212b1e5180e3bf72d0d4426ae6e1be7"}'
+curl -X POST "http://127.0.0.1:8080/api/viewers/viewer1/streams/0x345aea25bfe6877af48afaeb51017318f212b1e5180e3bf72d0d4426ae6e1be7/sessions"
 
-curl -X POST http://127.0.0.1:8080/api/streams/end \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stream_id":"0x345aea25bfe6877af48afaeb51017318f212b1e5180e3bf72d0d4426ae6e1be7",
-    "account_id":"0x1d27e78d4ee956f4834806212ffd8c4fed8acb0501f5e7666372df0ff9f0ee09"
-  }'
+curl -X POST "http://127.0.0.1:8080/api/creators/thouny/streams/0x345aea25bfe6877af48afaeb51017318f212b1e5180e3bf72d0d4426ae6e1be7/end"

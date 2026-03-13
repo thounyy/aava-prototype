@@ -69,44 +69,27 @@ RUST_LOG=info cargo run
 
 ```bash
 # Create a creator account (tx is built, signed & executed server-side)
-curl -X POST http://127.0.0.1:8080/api/accounts/creator/create \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_handle":"<USER_HANDLE>"
-  }'
+curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_IDENTIFIER>"
 ```
 
 ### 2. Test streams
 
 ```bash
 # Start a stream
-curl -X POST http://127.0.0.1:8080/api/streams/start \
-  -H "Content-Type: application/json" \
-  -d '{
-    "account_id":"<ACCOUNT_OBJECT_ID>"
-  }'
+curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_IDENTIFIER>/streams"
   
 # End a stream (registers blob, uploads to Walrus, certifies — all server-side)
-curl -X POST http://127.0.0.1:8080/api/streams/end \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stream_id":"<STREAM_ID>",
-    "account_id":"<ACCOUNT_OBJECT_ID>"
-  }'
+curl -X POST "http://127.0.0.1:8080/api/creators/<ACCOUNT_IDENTIFIER>/streams/<STREAM_ID>/end"
 ```
 
 ### 3. Test sessions
 
 ```bash
 # Test opening a session
-curl -X POST http://127.0.0.1:8080/api/sessions/open \
-  -H "Content-Type: application/json" \
-  -d '{"viewer_id":"viewer1","stream_id":"<STREAM_ID>"}'
+curl -X POST "http://127.0.0.1:8080/api/viewers/<VIEWER_IDENTIFIER>/streams/<STREAM_ID>/sessions"
 
 # Test closing a session
-curl -X POST http://127.0.0.1:8080/api/sessions/close \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"<SESSION_ID_FROM_OPEN>"}'
+curl -X POST "http://127.0.0.1:8080/api/viewers/<VIEWER_IDENTIFIER>/sessions/<SESSION_ID_FROM_OPEN>/close"
 ```
 
 ### 4. Verify Redis Sessions

@@ -1,6 +1,11 @@
 use std::sync::Arc;
 
-use axum::{extract::State, response::Json, routing::post, Router};
+use axum::{
+    extract::{Path, State},
+    response::Json,
+    routing::post,
+    Router,
+};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -10,30 +15,33 @@ use crate::AppState;
 
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/accounts/creator/create", post(create_creator_account))
-        .route("/api/accounts/viewer/create", post(create_viewer_account))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateCreatorAccountRequest {
-    pub user_handle: String,
+        .route(
+            "/api/creators/:account_identifier",
+            post(create_creator_account),
+        )
+        .route(
+            "/api/viewers/:account_identifier",
+            post(create_viewer_account),
+        )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCreatorAccountResponse {
     pub tx_digest: String,
+    pub account_id: String,
 }
 
 async fn create_creator_account(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<CreateCreatorAccountRequest>,
+    Path(account_identifier): Path<String>,
 ) -> Result<Json<CreateCreatorAccountResponse>, AppError> {
-    info!("Creating creator account for user {}", request.user_handle);
+    info!("Creating creator account for identifier {}", account_identifier);
+    let account_id = sui::ids::derive_account_id(&account_identifier)?;
 
     let tx = sui::creator::build_create_account_tx(
         state.sui_client.clone(),
         sui::executor::wallet_address(),
-        request.user_handle,
+        account_identifier,
     )
     .await?;
 
@@ -41,24 +49,24 @@ async fn create_creator_account(
 
     Ok(Json(CreateCreatorAccountResponse {
         tx_digest: result.digest,
+        account_id: account_id.to_string(),
     }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateViewerAccountRequest {
-    pub user_handle: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateViewerAccountResponse {
-    pub user_handle: String,
+    pub account_identifier: String,
     pub account_id: String,
 }
 
 async fn create_viewer_account(
-    Json(request): Json<CreateViewerAccountRequest>,
+    Path(account_identifier): Path<String>,
 ) -> Result<Json<CreateViewerAccountResponse>, AppError> {
-    info!("Creating account for user {}", request.user_handle);
+    info!("Creating viewer account for identifier {}", account_identifier);
     // TODO: call viewer::new_account, get the account object id from the tx effects
-    todo!()
+    let account_id = sui::ids::derive_account_id(&account_identifier)?;
+    Ok(Json(CreateViewerAccountResponse {
+        account_identifier,
+        account_id: account_id.to_string(),
+    }))
 }

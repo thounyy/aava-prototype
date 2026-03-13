@@ -1,18 +1,31 @@
 use std::sync::Arc;
 
-use axum::{http::StatusCode, response::Json, routing::post, Router};
+use axum::{
+    extract::Path,
+    response::Json,
+    routing::post,
+    Router,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::env;
 use tracing::{error, info};
 use uuid::Uuid;
 
+use crate::enclave::error::EnclaveError;
+use crate::error::AppError;
 use crate::AppState;
 
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/sessions/open", post(open_session))
-        .route("/api/sessions/close", post(close_session))
+        .route(
+            "/api/viewers/:viewer_identifier/streams/:stream_id/sessions",
+            post(open_session),
+        )
+        .route(
+            "/api/viewers/:viewer_identifier/sessions/:session_id/close",
+            post(close_session),
+        )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,23 +38,12 @@ pub struct Session {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenSessionRequest {
-    pub viewer_id: String,
-    pub stream_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenSessionResponse {
     pub session_id: String,
     pub viewer_id: String,
     pub stream_id: String,
     pub status: SessionStatus,
     pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloseSessionRequest {
-    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,37 +77,28 @@ struct EnclaveCloseSessionResponse {
 }
 
 async fn open_session(
-    Json(request): Json<OpenSessionRequest>,
-) -> Result<Json<OpenSessionResponse>, (StatusCode, String)> {
+    Path((viewer_identifier, stream_id)): Path<(String, String)>,
+) -> Result<Json<OpenSessionResponse>, AppError> {
     info!(
         "Opening session for viewer {} on stream {}",
-        request.viewer_id, request.stream_id
+        viewer_identifier, stream_id
     );
 
-    // Get enclave URL from environment, default to localhost
     let enclave_url =
         env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-    // Create request payload
     let request_body = serde_json::json!({
-        "viewer_id": request.viewer_id,
-        "stream_id": request.stream_id,
+        "viewer_id": viewer_identifier,
+        "stream_id": stream_id,
     });
 
-    // Make HTTP request to enclave
     let client = reqwest::Client::new();
     let response = client
         .post(&format!("{}/open_session", enclave_url))
         .json(&request_body)
         .send()
         .await
-        .map_err(|e| {
-            error!("Failed to connect to enclave at {}: {}", enclave_url, e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("TEE connection error: {}", e),
-            )
-        })?;
+        .map_err(EnclaveError::ConnectionFailed)?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -114,19 +107,16 @@ async fn open_session(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         error!("Enclave returned error status {}: {}", status, error_text);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE error: HTTP {} - {}", status, error_text),
-        ));
+        return Err(EnclaveError::ApiError {
+            status: status.as_u16(),
+            body: error_text,
+        }
+        .into());
     }
 
-    // Parse response
     let enclave_response: EnclaveOpenSessionResponse = response.json().await.map_err(|e| {
         error!("Failed to parse enclave response: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE response parsing error: {}", e),
-        )
+        EnclaveError::ParseError(e.to_string())
     })?;
 
     info!(
@@ -144,33 +134,27 @@ async fn open_session(
 }
 
 async fn close_session(
-    Json(request): Json<CloseSessionRequest>,
-) -> Result<Json<CloseSessionResponse>, (StatusCode, String)> {
-    info!("Closing session {}", request.session_id);
+    Path((viewer_identifier, session_id)): Path<(String, String)>,
+) -> Result<Json<CloseSessionResponse>, AppError> {
+    info!(
+        "Closing session {} for viewer {}",
+        session_id, viewer_identifier
+    );
 
-    // Get enclave URL from environment, default to localhost
     let enclave_url =
         env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
 
-    // Create request payload
     let request_body = serde_json::json!({
-        "session_id": request.session_id,
+        "session_id": session_id,
     });
 
-    // Make HTTP request to enclave
     let client = reqwest::Client::new();
     let response = client
         .post(&format!("{}/close_session", enclave_url))
         .json(&request_body)
         .send()
         .await
-        .map_err(|e| {
-            error!("Failed to connect to enclave at {}: {}", enclave_url, e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("TEE connection error: {}", e),
-            )
-        })?;
+        .map_err(EnclaveError::ConnectionFailed)?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -179,19 +163,16 @@ async fn close_session(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         error!("Enclave returned error status {}: {}", status, error_text);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE error: HTTP {} - {}", status, error_text),
-        ));
+        return Err(EnclaveError::ApiError {
+            status: status.as_u16(),
+            body: error_text,
+        }
+        .into());
     }
 
-    // Parse response
     let enclave_response: EnclaveCloseSessionResponse = response.json().await.map_err(|e| {
         error!("Failed to parse enclave response: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("TEE response parsing error: {}", e),
-        )
+        EnclaveError::ParseError(e.to_string())
     })?;
 
     info!(
