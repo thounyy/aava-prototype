@@ -8,11 +8,10 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::env;
-use tracing::{error, info};
+use tracing::info;
 use uuid::Uuid;
 
-use crate::enclave::error::EnclaveError;
+use crate::enclave;
 use crate::error::AppError;
 use crate::AppState;
 
@@ -60,27 +59,6 @@ pub enum SessionStatus {
     Error(String),
 }
 
-/// Response from the enclave for session creation
-#[derive(Debug, Serialize, Deserialize)]
-struct EnclaveOpenSessionResponse {
-    session_id: String,
-    viewer_id: String,
-    stream_id: String,
-    status: String,
-}
-
-/// Response from the enclave for session termination
-#[derive(Debug, Serialize, Deserialize)]
-struct EnclaveCloseSessionResponse {
-    session_id: String,
-    status: String,
-}
-
-fn enclave_internal_token() -> Result<String, EnclaveError> {
-    env::var("ENCLAVE_INTERNAL_TOKEN")
-        .map_err(|_| EnclaveError::ParseError("Missing ENCLAVE_INTERNAL_TOKEN".into()))
-}
-
 async fn open_session(
     Path((viewer_identifier, stream_id)): Path<(String, String)>,
 ) -> Result<Json<OpenSessionResponse>, AppError> {
@@ -89,47 +67,7 @@ async fn open_session(
         viewer_identifier, stream_id
     );
 
-    let enclave_url =
-        env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let token = enclave_internal_token()?;
-
-    let request_body = serde_json::json!({
-        "viewer_id": viewer_identifier,
-        "stream_id": stream_id,
-    });
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&format!("{}/internal/sessions/open", enclave_url))
-        .header("X-Internal-Token", token)
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(EnclaveError::ConnectionFailed)?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        error!("Enclave returned error status {}: {}", status, error_text);
-        return Err(EnclaveError::ApiError {
-            status: status.as_u16(),
-            body: error_text,
-        }
-        .into());
-    }
-
-    let enclave_response: EnclaveOpenSessionResponse = response.json().await.map_err(|e| {
-        error!("Failed to parse enclave response: {}", e);
-        EnclaveError::ParseError(e.to_string())
-    })?;
-
-    info!(
-        "Session {} opened successfully",
-        enclave_response.session_id
-    );
+    let enclave_response = enclave::session::open_session(&viewer_identifier, &stream_id).await?;
 
     Ok(Json(OpenSessionResponse {
         session_id: enclave_response.session_id,
@@ -148,46 +86,7 @@ async fn close_session(
         session_id, viewer_identifier
     );
 
-    let enclave_url =
-        env::var("ENCLAVE_URL").unwrap_or_else(|_| "http://localhost:3000".to_string());
-    let token = enclave_internal_token()?;
-
-    let request_body = serde_json::json!({
-        "session_id": session_id,
-    });
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&format!("{}/internal/sessions/close", enclave_url))
-        .header("X-Internal-Token", token)
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(EnclaveError::ConnectionFailed)?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        error!("Enclave returned error status {}: {}", status, error_text);
-        return Err(EnclaveError::ApiError {
-            status: status.as_u16(),
-            body: error_text,
-        }
-        .into());
-    }
-
-    let enclave_response: EnclaveCloseSessionResponse = response.json().await.map_err(|e| {
-        error!("Failed to parse enclave response: {}", e);
-        EnclaveError::ParseError(e.to_string())
-    })?;
-
-    info!(
-        "Session {} closed successfully",
-        enclave_response.session_id
-    );
+    let enclave_response = enclave::session::close_session(&session_id).await?;
 
     Ok(Json(CloseSessionResponse {
         session_id: enclave_response.session_id,
