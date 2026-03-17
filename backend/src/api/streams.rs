@@ -7,11 +7,8 @@ use axum::{
     Router,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine as _;
-use rand::RngExt;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use sui_sdk_types::Address;
 use tracing::{info, warn};
 
 use crate::enclave;

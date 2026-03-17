@@ -55,18 +55,28 @@ async fn create_creator_account(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateViewerAccountResponse {
-    pub account_handle: String,
+    pub tx_digest: String,
     pub account_id: String,
 }
 
 async fn create_viewer_account(
+    State(state): State<Arc<AppState>>,
     Path(account_handle): Path<String>,
 ) -> Result<Json<CreateViewerAccountResponse>, AppError> {
     info!("Creating viewer account for identifier {}", account_handle);
-    // TODO: call viewer::new_account, get the account object id from the tx effects
     let account_id = sui::read::derive_account_id(&account_handle)?;
-    Ok(Json(CreateViewerAccountResponse {
+    
+    let tx = sui::viewer::build_create_account_tx(
+        state.sui_client.clone(),
+        sui::executor::wallet_address(),
         account_handle,
+    )
+    .await?;
+
+    let result = sui::executor::sign_and_execute(state.sui_client.clone(), tx).await?;
+
+    Ok(Json(CreateViewerAccountResponse {
+        tx_digest: result.digest,
         account_id: account_id.to_string(),
     }))
 }
