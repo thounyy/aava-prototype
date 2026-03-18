@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::State,
     response::Json,
-    routing::post,
     Router,
+    routing::post,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -22,14 +22,14 @@ pub const BYTES_PER_UNIT_SIZE: u64 = 1_024 * 1_024;
 
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/creators/{account_handle}/streams", post(start_stream))
-        .route(
-            "/api/creators/{account_handle}/streams/{stream_id}/end",
-            post(end_stream),
-        )
+        .route("/api/streams/start", post(start_stream))
+        .route("/api/streams/end", post(end_stream))
 }
 
-// ── Request / Response types ────────────────────────────────────────
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamStartRequest {
+    pub account_handle: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamStartResponse {
@@ -37,25 +37,14 @@ pub struct StreamStartResponse {
     pub stream_account_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamEndResponse {
-    pub stream_id: String,
-    pub sessions_count: u64,
-    pub init_tx_digest: String,
-    pub finalize_action: String,
-    pub finalize_tx_digest: String,
-}
-
-// ── Handlers ────────────────────────────────────────────────────────
-
 async fn start_stream(
     State(state): State<Arc<AppState>>,
-    Path(account_handle): Path<String>,
+    Json(req): Json<StreamStartRequest>,
 ) -> Result<Json<StreamStartResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&account_handle)?;
+    let account_id = sui::read::derive_account_id(&req.account_handle)?;
     info!(
         "Creating stream for account_handle {} (derived account {})",
-        account_handle, account_id
+        req.account_handle, account_id
     );
 
     let tx = sui::creator::build_create_stream_tx(
@@ -73,6 +62,21 @@ async fn start_stream(
     }))
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEndRequest {
+    pub account_handle: String,
+    pub stream_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEndResponse {
+    pub stream_id: String,
+    pub sessions_count: u64,
+    pub init_tx_digest: String,
+    pub finalize_action: String,
+    pub finalize_tx_digest: String,
+}
+
 /// 1. Fetch attested session data from enclave
 /// 2. Build, sign & execute the verify_and_store_blob tx
 /// 3. Upload blob payload to Walrus relay
@@ -80,12 +84,12 @@ async fn start_stream(
 /// 5. Cleanup enclave state
 async fn end_stream(
     State(state): State<Arc<AppState>>,
-    Path((account_handle, stream_id)): Path<(String, String)>,
+    Json(req): Json<StreamEndRequest>,
 ) -> Result<Json<StreamEndResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&account_handle)?;
+    let account_id = sui::read::derive_account_id(&req.account_handle)?;
     info!(
         "Ending stream {} for account_handle {} (derived account {})",
-        stream_id, account_handle, account_id
+        req.stream_id, req.account_handle, account_id
     );
 
     // ── 1. Fetch Walrus system params ───────────────────────────────
@@ -93,12 +97,12 @@ async fn end_stream(
 
     // ── 2. Fetch attested sessions from enclave ─────────────────────
     let (data, signature, timestamp_ms) =
-        enclave::stream::fetch_signed_dataset(&stream_id, walrus_params.n_shards).await?;
+        enclave::stream::fetch_signed_dataset(&req.stream_id, walrus_params.n_shards).await?;
 
     if data.sessions_count == 0 {
-        warn!("No active sessions found for stream {}", stream_id);
+        warn!("No active sessions found for stream {}", req.stream_id);
         return Ok(Json(StreamEndResponse {
-            stream_id,
+            stream_id: req.stream_id,
             sessions_count: 0,
             init_tx_digest: String::new(),
             finalize_action: "noop".into(),
@@ -123,7 +127,7 @@ async fn end_stream(
         sender,
         account_id,
         price_for_encoded_length,
-        &stream_id,
+        &req.stream_id,
         timestamp_ms,
         &signature,
         &data.blob_id,
@@ -142,7 +146,7 @@ async fn end_stream(
 
     info!(
         "Register blob tx executed for stream {}: {}",
-        stream_id, register_result.digest
+        req.stream_id, register_result.digest
     );
 
     // ── 5. Find the Blob object from tx effects ─────────────────────
@@ -166,7 +170,7 @@ async fn end_stream(
                 state.sui_client.clone(),
                 sender,
                 account_id,
-                &stream_id,
+                &req.stream_id,
                 &relay_response.certificate,
             )
             .await?;
@@ -175,13 +179,13 @@ async fn end_stream(
         Err(e) => {
             warn!(
                 "Walrus upload failed after successful tx {} for stream {}: {e}",
-                register_result.digest, stream_id,
+                register_result.digest, req.stream_id,
             );
             let tx = sui::creator::build_destroy_blob_tx(
                 state.sui_client.clone(),
                 sender,
                 account_id,
-                &stream_id,
+                &req.stream_id,
             )
             .await?;
             ("destroy_blob".to_string(), tx)
@@ -193,13 +197,13 @@ async fn end_stream(
 
     info!(
         "Finalize ({finalize_action}) tx executed for stream {}: {}",
-        stream_id, finalize_result.digest
+        req.stream_id, finalize_result.digest
     );
 
-    enclave::stream::cleanup_dataset(&stream_id).await?;
+    enclave::stream::cleanup_dataset(&req.stream_id).await?;
 
     Ok(Json(StreamEndResponse {
-        stream_id,
+        stream_id: req.stream_id,
         sessions_count: data.sessions_count,
         init_tx_digest: register_result.digest,
         finalize_action,

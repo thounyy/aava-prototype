@@ -1,0 +1,83 @@
+use std::{collections::HashMap, sync::Arc};
+
+use axum::{extract::State, response::Json, routing::post, Router};
+use serde::{Deserialize, Serialize};
+use tracing::info;
+
+use crate::error::AppError;
+use crate::sui;
+use crate::AppState;
+
+pub fn create_router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/viewers/create", post(create_viewer_account))
+        .route("/api/viewers/get", post(get_viewer_account))
+        .route("/api/viewers/exists", post(viewer_account_exists))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountHandleRequest {
+    pub account_handle: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateViewerAccountResponse {
+    pub tx_digest: String,
+    pub account_id: String,
+}
+
+async fn create_viewer_account(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AccountHandleRequest>,
+) -> Result<Json<CreateViewerAccountResponse>, AppError> {
+    info!(
+        "Creating viewer account for account_handle {}",
+        req.account_handle
+    );
+    let account_id = sui::read::derive_account_id(&req.account_handle)?;
+
+    let tx = sui::viewer::build_create_account_tx(
+        state.sui_client.clone(),
+        sui::executor::wallet_address(),
+        req.account_handle,
+    )
+    .await?;
+
+    let result = sui::executor::sign_and_execute(state.sui_client.clone(), tx).await?;
+
+    Ok(Json(CreateViewerAccountResponse {
+        tx_digest: result.digest,
+        account_id: account_id.to_string(),
+    }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetAccountResponse {
+    pub addr: Option<String>,
+    pub metadata: HashMap<String, String>,
+}
+
+async fn get_viewer_account(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AccountHandleRequest>,
+) -> Result<Json<GetAccountResponse>, AppError> {
+    let account_id = sui::read::derive_account_id(&req.account_handle)?;
+    let (addr, metadata) = sui::viewer::get_account(state.sui_client.clone(), account_id).await?;
+
+    Ok(Json(GetAccountResponse { addr, metadata }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountExistsResponse {
+    pub exists: bool,
+}
+
+async fn viewer_account_exists(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<AccountHandleRequest>,
+) -> Result<Json<AccountExistsResponse>, AppError> {
+    let account_id = sui::read::derive_account_id(&req.account_handle)?;
+    let exists = sui::viewer::account_exists(state.sui_client.clone(), account_id).await?;
+
+    Ok(Json(AccountExistsResponse { exists }))
+}

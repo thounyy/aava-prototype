@@ -19,7 +19,8 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let app = Router::new()
-        .merge(api::accounts::create_router())
+        .merge(api::creator::create_router())
+        .merge(api::viewer::create_router())
         .merge(api::sessions::create_router())
         .merge(api::streams::create_router())
         .with_state(state);

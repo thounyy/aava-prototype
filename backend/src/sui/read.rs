@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use bcs;
 use prost_types::value::Kind;
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
-use sui_rpc::proto::sui::rpc::v2::ListDynamicFieldsRequest;
+use sui_rpc::proto::sui::rpc::v2::{Object, GetObjectRequest, ListDynamicFieldsRequest};
 use sui_rpc::Client;
 use sui_sdk_types::{Address, TypeTag};
 
@@ -28,6 +28,29 @@ pub fn derive_account_id(account_handle: &str) -> Result<Address, SuiError> {
     Ok(parent.derive_object_id(&key_type_tag, &key_bytes))
 }
 
+pub async fn get_object(client: Arc<Client>, account_id: Address) -> Result<Object, SuiError> {
+    let req = GetObjectRequest::default()
+        .with_object_id(account_id.to_string())
+        .with_read_mask(FieldMask::from_paths(["object_type", "json"]));
+
+    let resp = match client
+        .as_ref()
+        .clone()
+        .ledger_client()
+        .get_object(req)
+        .await
+    {
+        Ok(r) => r.into_inner(),
+        Err(e) => {
+            return Err(SuiError::RpcError(format!(
+                "Failed to get account object {account_id}: {e}"
+            )));
+        }
+    };
+
+    resp.object
+        .ok_or_else(|| SuiError::ParseError("Missing object".into()))
+}
 
 pub struct WalrusSystemParams {
     pub price_per_unit_size: u64,
@@ -56,7 +79,9 @@ pub async fn fetch_walrus_system_params(
                 ])),
         )
         .await
-        .map_err(|e| SuiError::RpcError(format!("Failed to list Walrus system dynamic fields: {e}")))?
+        .map_err(|e| {
+            SuiError::RpcError(format!("Failed to list Walrus system dynamic fields: {e}"))
+        })?
         .into_inner();
 
     if resp.dynamic_fields.len() != 1 {
@@ -77,18 +102,26 @@ pub async fn fetch_walrus_system_params(
         )));
     }
 
-    let field_obj = df
-        .field_object_opt()
-        .ok_or_else(|| SuiError::ParseError("Missing field_object for SystemStateInnerV1".into()))?;
+    let field_obj = df.field_object_opt().ok_or_else(|| {
+        SuiError::ParseError("Missing field_object for SystemStateInnerV1".into())
+    })?;
 
     let fields = match field_obj.json_opt().and_then(|v| v.kind.as_ref()) {
         Some(Kind::StructValue(s)) => &s.fields,
-        _ => return Err(SuiError::ParseError("Missing JSON on SystemStateInnerV1".into())),
+        _ => {
+            return Err(SuiError::ParseError(
+                "Missing JSON on SystemStateInnerV1".into(),
+            ))
+        }
     };
 
     let inner = match fields.get("value").and_then(|v| v.kind.as_ref()) {
         Some(Kind::StructValue(s)) => &s.fields,
-        _ => return Err(SuiError::ParseError("Missing 'value' in SystemStateInnerV1".into())),
+        _ => {
+            return Err(SuiError::ParseError(
+                "Missing 'value' in SystemStateInnerV1".into(),
+            ))
+        }
     };
 
     let parse_u64 = |key: &str| -> Result<u64, SuiError> {
@@ -96,7 +129,9 @@ pub async fn fetch_walrus_system_params(
             Some(Kind::StringValue(s)) => s
                 .parse()
                 .map_err(|_| SuiError::ParseError(format!("{key} is not a valid u64"))),
-            _ => Err(SuiError::ParseError(format!("Missing {key} in SystemStateInnerV1"))),
+            _ => Err(SuiError::ParseError(format!(
+                "Missing {key} in SystemStateInnerV1"
+            ))),
         }
     };
 
@@ -105,7 +140,11 @@ pub async fn fetch_walrus_system_params(
 
     let committee = match inner.get("committee").and_then(|v| v.kind.as_ref()) {
         Some(Kind::StructValue(s)) => &s.fields,
-        _ => return Err(SuiError::ParseError("Missing 'committee' in SystemStateInnerV1".into())),
+        _ => {
+            return Err(SuiError::ParseError(
+                "Missing 'committee' in SystemStateInnerV1".into(),
+            ))
+        }
     };
 
     let n_shards = match committee.get("n_shards").and_then(|v| v.kind.as_ref()) {

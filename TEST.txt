@@ -1,7 +1,19 @@
-curl -X POST "http://127.0.0.1:8080/api/creators/thouny"
+curl -X POST "http://127.0.0.1:8080/api/creators" \
+  -H "Content-Type: application/json" \
+  -d '{"account_handle":"thouny"}'
 
-curl -X POST "http://127.0.0.1:8080/api/creators/thouny/streams"
+curl -X POST "http://127.0.0.1:8080/api/streams/start" \
+  -H "Content-Type: application/json" \
+  -d '{"account_handle":"thouny"}'
 
-curl -X POST "http://127.0.0.1:8080/api/viewers/viewer1/streams/0x0ad25c2b5ad046d4cbeeb5b1471b7a3bcf71c71035754bad0a30e758959597db/sessions"
+curl -X POST "http://127.0.0.1:8080/api/sessions/open" \
+  -H "Content-Type: application/json" \
+  -d '{"viewer_identifier":"viewer1","stream_id":"0x0ad25c2b5ad046d4cbeeb5b1471b7a3bcf71c71035754bad0a30e758959597db"}'
 
-curl -X POST "http://127.0.0.1:8080/api/creators/thouny/streams/0x0ad25c2b5ad046d4cbeeb5b1471b7a3bcf71c71035754bad0a30e758959597db/end"
+curl -X POST "http://127.0.0.1:8080/api/streams/end" \
+  -H "Content-Type: application/json" \
+  -d '{"account_handle":"thouny","stream_id":"0x0ad25c2b5ad046d4cbeeb5b1471b7a3bcf71c71035754bad0a30e758959597db"}'
+
+curl -X POST "http://127.0.0.1:8080/api/viewers/create" \
+  -H "Content-Type: application/json" \
+  -d '{"account_handle":"viewer1"}'

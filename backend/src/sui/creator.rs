@@ -1,15 +1,118 @@
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
+use prost_types::value::Kind;
 use sui_rpc::Client;
 use sui_sdk_types::{Address, StructTag, Transaction};
-use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder, intent::CoinWithBalance};
+use sui_transaction_builder::{intent::CoinWithBalance, Function, ObjectInput, TransactionBuilder};
 
 use crate::sui::constants::{
     AAVA_PACKAGE, ACCOUNT_REGISTRY, ENCLAVE_CONFIG, WALRUS_SYSTEM, WAL_COIN_TYPE,
 };
 use crate::sui::error::SuiError;
+use crate::sui::read;
 use crate::walrus::{blob::CertificateData, tip::TipPayment};
+
+pub async fn account_exists(client: Arc<Client>, account_id: Address) -> Result<bool, SuiError> {
+    let obj = read::get_object(client, account_id).await?;
+    Ok(obj
+        .object_type_opt()
+        .is_some_and(|t| t.contains(&format!("{}::creator::Account", AAVA_PACKAGE))))
+}
+
+pub async fn get_account(
+    client: Arc<Client>,
+    account_id: Address,
+) -> Result<(Vec<String>, HashMap<String, String>), SuiError> {
+    let obj = read::get_object(client, account_id).await?;
+
+    if !obj
+        .object_type_opt()
+        .is_some_and(|t| t == &format!("{}::creator::Account", AAVA_PACKAGE))
+    {
+        return Err(SuiError::InvalidInput(format!(
+            "Object {account_id} is not a creator::Account (type={})",
+            obj.object_type_opt().unwrap_or_default()
+        )));
+    }
+
+    let fields = match obj.json_opt().and_then(|v| v.kind.as_ref()) {
+        Some(Kind::StructValue(s)) => &s.fields,
+        _ => {
+            return Err(SuiError::ParseError(format!(
+                "Missing JSON fields for creator::Account {account_id}"
+            )))
+        }
+    };
+
+    let members_value = fields
+        .get("members")
+        .ok_or_else(|| SuiError::ParseError("Missing members field".into()))?;
+    let members = members_value
+        .kind
+        .as_ref()
+        .and_then(|k| match k {
+            Kind::StructValue(s) => s.fields.get("contents"),
+            _ => None,
+        })
+        .and_then(|contents| contents.kind.as_ref())
+        .and_then(|k| match k {
+            Kind::ListValue(list) => Some(list),
+            _ => None,
+        })
+        .map(|list| {
+            list.values
+                .iter()
+                .filter_map(|v| match v.kind.as_ref() {
+                    Some(Kind::StringValue(s)) => Some(s.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<String>>()
+        })
+        .ok_or_else(|| SuiError::ParseError("members.contents.values is missing".into()))?;
+
+    let metadata = fields
+        .get("metadata")
+        .and_then(|m| m.kind.as_ref())
+        .and_then(|k| match k {
+            Kind::StructValue(s) => s.fields.get("contents"),
+            _ => None,
+        })
+        .and_then(|contents| contents.kind.as_ref())
+        .and_then(|k| match k {
+            Kind::ListValue(list) => Some(list),
+            _ => None,
+        })
+        .map(|list| {
+            list.values
+                .iter()
+                .filter_map(|item| match item.kind.as_ref() {
+                    Some(Kind::StructValue(entry)) => {
+                        let key = entry
+                            .fields
+                            .get("key")
+                            .and_then(|v| match v.kind.as_ref() {
+                                Some(Kind::StringValue(s)) => Some(s.clone()),
+                                _ => None,
+                            })?;
+                        let val =
+                            entry
+                                .fields
+                                .get("value")
+                                .and_then(|v| match v.kind.as_ref() {
+                                    Some(Kind::StringValue(s)) => Some(s.clone()),
+                                    _ => None,
+                                })?;
+                        Some((key, val))
+                    }
+                    _ => None,
+                })
+                .collect::<HashMap<String, String>>()
+        })
+        .unwrap_or_default();
+
+    Ok((members, metadata))
+}
 
 // TODO: modify for production
 pub async fn build_create_account_tx(
