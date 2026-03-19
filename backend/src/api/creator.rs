@@ -43,11 +43,12 @@ async fn create_creator_account(
         req.account_handle,
     )
     .await?;
+    let tx_digest = tx.digest().to_string();
 
-    let result = sui::executor::sign_and_execute(state.sui_client.clone(), tx).await?;
+    let _result = sui::executor::sign_and_execute(state.sui_client.clone(), tx).await?;
 
     Ok(Json(CreateCreatorAccountResponse {
-        tx_digest: result.digest,
+        tx_digest,
         account_id: account_id.to_string(),
     }))
 }

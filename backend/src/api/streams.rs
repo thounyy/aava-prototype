@@ -1,11 +1,6 @@
 use std::sync::Arc;
 
-use axum::{
-    extract::State,
-    response::Json,
-    Router,
-    routing::post,
-};
+use axum::{extract::State, response::Json, routing::post, Router};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -14,6 +9,8 @@ use tracing::{info, warn};
 use crate::enclave;
 use crate::error::AppError;
 use crate::sui;
+use crate::sui::constants::AAVA_PACKAGE;
+use crate::sui::constants::WALRUS_PACKAGE;
 use crate::walrus;
 use crate::AppState;
 
@@ -33,8 +30,8 @@ pub struct StreamStartRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamStartResponse {
+    pub stream_id: String,
     pub tx_digest: String,
-    pub stream_account_id: String,
 }
 
 async fn start_stream(
@@ -54,11 +51,16 @@ async fn start_stream(
     )
     .await?;
 
-    let result = sui::executor::sign_and_execute(state.sui_client.clone(), tx).await?;
+    let tx_digest = tx.digest().to_string();
+    let tx_results = sui::executor::sign_and_execute(state.sui_client.clone(), tx).await?;
+    let stream_id = sui::read::find_object_id_from_tx_results(
+        tx_results,
+        &format!("{}::creator::Stream", AAVA_PACKAGE),
+    )?;
 
     Ok(Json(StreamStartResponse {
-        tx_digest: result.digest,
-        stream_account_id: account_id.to_string(),
+        stream_id,
+        tx_digest,
     }))
 }
 
@@ -73,7 +75,6 @@ pub struct StreamEndResponse {
     pub stream_id: String,
     pub sessions_count: u64,
     pub init_tx_digest: String,
-    pub finalize_action: String,
     pub finalize_tx_digest: String,
 }
 
@@ -93,11 +94,12 @@ async fn end_stream(
     );
 
     // ── 1. Fetch Walrus system params ───────────────────────────────
-    let walrus_params = sui::read::fetch_walrus_system_params(state.sui_client.clone()).await?;
+    let (price_per_unit_size, n_shards) =
+        sui::read::fetch_walrus_system_params(state.sui_client.clone()).await?;
 
     // ── 2. Fetch attested sessions from enclave ─────────────────────
     let (data, signature, timestamp_ms) =
-        enclave::stream::fetch_signed_dataset(&req.stream_id, walrus_params.n_shards).await?;
+        enclave::stream::fetch_signed_dataset(&req.stream_id, n_shards).await?;
 
     if data.sessions_count == 0 {
         warn!("No active sessions found for stream {}", req.stream_id);
@@ -105,7 +107,6 @@ async fn end_stream(
             stream_id: req.stream_id,
             sessions_count: 0,
             init_tx_digest: String::new(),
-            finalize_action: "noop".into(),
             finalize_tx_digest: String::new(),
         }));
     }
@@ -115,7 +116,7 @@ async fn end_stream(
         .map_err(|e| AppError::Internal(format!("Failed to serialize Walrus payload: {e}")))?;
 
     let price_for_encoded_length =
-        data.encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * walrus_params.price_per_unit_size * 53;
+        data.encoded_size.div_ceil(BYTES_PER_UNIT_SIZE) * price_per_unit_size * 53; // 53 epochs is 2y, maximum allowed
 
     let tip_config = walrus::tip::get_tip_config(payload.clone(), data.encoded_size).await?;
 
@@ -141,63 +142,64 @@ async fn end_stream(
     )
     .await?;
 
-    let register_result =
+    let init_tx_digest = register_tx.digest().to_string();
+    let init_results =
         sui::executor::sign_and_execute(state.sui_client.clone(), register_tx).await?;
 
     info!(
         "Register blob tx executed for stream {}: {}",
-        req.stream_id, register_result.digest
+        req.stream_id, init_tx_digest
     );
 
     // ── 5. Find the Blob object from tx effects ─────────────────────
-    let blob_object_id =
-        find_blob_object_id(state.sui_client.clone(), &register_result.digest).await?;
+    let blob_object_id = sui::read::find_object_id_from_tx_results(
+        init_results,
+        &format!("{}::blob::Blob", WALRUS_PACKAGE),
+    )?;
 
     let blob_id_b64 = URL_SAFE_NO_PAD.encode(&data.blob_id);
 
     // ── 6. Upload to Walrus relay, then certify or destroy ──────────
-    let (finalize_action, finalize_tx) = match walrus::blob::upload_dataset(
+    let finalize_tx = match walrus::blob::upload_dataset(
         &blob_object_id,
         &blob_id_b64,
         payload,
-        Some(&register_result.digest),
+        Some(&init_tx_digest),
         tip_config.nonce_b64.as_deref(),
     )
     .await
     {
         Ok(relay_response) => {
-            let tx = sui::creator::build_certify_blob_tx(
+            sui::creator::build_certify_blob_tx(
                 state.sui_client.clone(),
                 sender,
                 account_id,
                 &req.stream_id,
                 &relay_response.certificate,
             )
-            .await?;
-            ("certify_blob".to_string(), tx)
+            .await?
         }
         Err(e) => {
             warn!(
                 "Walrus upload failed after successful tx {} for stream {}: {e}",
-                register_result.digest, req.stream_id,
+                init_tx_digest, req.stream_id,
             );
-            let tx = sui::creator::build_destroy_blob_tx(
+            sui::creator::build_destroy_blob_tx(
                 state.sui_client.clone(),
                 sender,
                 account_id,
                 &req.stream_id,
             )
-            .await?;
-            ("destroy_blob".to_string(), tx)
+            .await?
         }
     };
 
-    let finalize_result =
-        sui::executor::sign_and_execute(state.sui_client.clone(), finalize_tx).await?;
+    let finalize_tx_digest = finalize_tx.digest().to_string();
+    sui::executor::sign_and_execute(state.sui_client.clone(), finalize_tx).await?;
 
     info!(
-        "Finalize ({finalize_action}) tx executed for stream {}: {}",
-        req.stream_id, finalize_result.digest
+        "Finalize tx executed for stream {}: {}",
+        req.stream_id, finalize_tx_digest
     );
 
     enclave::stream::cleanup_dataset(&req.stream_id).await?;
@@ -205,41 +207,9 @@ async fn end_stream(
     Ok(Json(StreamEndResponse {
         stream_id: req.stream_id,
         sessions_count: data.sessions_count,
-        init_tx_digest: register_result.digest,
-        finalize_action,
-        finalize_tx_digest: finalize_result.digest,
+        init_tx_digest,
+        finalize_tx_digest,
     }))
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
-
-/// Extract the Blob object ID from the effects of an executed tx.
-async fn find_blob_object_id(
-    client: Arc<sui_rpc::Client>,
-    tx_digest: &str,
-) -> Result<String, AppError> {
-    use sui_rpc::field::{FieldMask, FieldMaskUtil};
-    use sui_rpc::proto::sui::rpc::v2::GetTransactionRequest;
-
-    let request = GetTransactionRequest::default()
-        .with_digest(tx_digest)
-        .with_read_mask(FieldMask::from_str("effects.changed_objects"));
-
-    let response = client
-        .as_ref()
-        .clone()
-        .ledger_client()
-        .get_transaction(request)
-        .await
-        .map_err(|e| {
-            sui::error::SuiError::RpcError(format!("Failed to fetch tx {tx_digest}: {e}"))
-        })?;
-
-    let tx = response.into_inner().transaction().clone();
-    tx.effects()
-        .changed_objects()
-        .iter()
-        .find(|obj| obj.object_type().contains("Blob"))
-        .map(|obj| obj.object_id().to_string())
-        .ok_or_else(|| AppError::Internal(format!("No Blob object found in tx {tx_digest}")))
-}

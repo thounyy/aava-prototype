@@ -20,6 +20,9 @@ pub enum SuiError {
 
     #[error("Unexpected response: {0}")]
     ParseError(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
 }
 
 impl SuiError {
@@ -30,6 +33,7 @@ impl SuiError {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
             Self::OnChainFailed(_) | Self::RpcError(_) => StatusCode::BAD_GATEWAY,
+            Self::NotFound(_) => StatusCode::NOT_FOUND,
         }
     }
 }

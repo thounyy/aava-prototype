@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bcs;
 use prost_types::value::Kind;
 use sui_rpc::field::{FieldMask, FieldMaskUtil};
-use sui_rpc::proto::sui::rpc::v2::{Object, GetObjectRequest, ListDynamicFieldsRequest};
+use sui_rpc::proto::sui::rpc::v2::{ExecutedTransaction, GetObjectRequest, ListDynamicFieldsRequest, Object};
 use sui_rpc::Client;
 use sui_sdk_types::{Address, TypeTag};
 
@@ -28,38 +28,45 @@ pub fn derive_account_id(account_handle: &str) -> Result<Address, SuiError> {
     Ok(parent.derive_object_id(&key_type_tag, &key_bytes))
 }
 
-pub async fn get_object(client: Arc<Client>, account_id: Address) -> Result<Object, SuiError> {
+pub async fn get_object(client: Arc<Client>, object_id: Address) -> Result<Object, SuiError> {
     let req = GetObjectRequest::default()
-        .with_object_id(account_id.to_string())
+        .with_object_id(object_id.to_string())
         .with_read_mask(FieldMask::from_paths(["object_type", "json"]));
 
-    let resp = match client
+    let resp = client
         .as_ref()
         .clone()
         .ledger_client()
         .get_object(req)
         .await
-    {
-        Ok(r) => r.into_inner(),
-        Err(e) => {
-            return Err(SuiError::RpcError(format!(
-                "Failed to get account object {account_id}: {e}"
-            )));
-        }
-    };
+        .map_err(|e| SuiError::RpcError(format!("Failed to get object {object_id}: {e}")))?;
 
-    resp.object
-        .ok_or_else(|| SuiError::ParseError("Missing object".into()))
+    resp
+        .into_inner()
+        .object
+        .ok_or_else(|| SuiError::RpcError(format!("Failed to get object {object_id}: empty object response")))
 }
 
-pub struct WalrusSystemParams {
-    pub price_per_unit_size: u64,
-    pub n_shards: u16,
+pub fn find_object_id_from_tx_results(
+    tx_results: ExecutedTransaction,
+    object_type: &str,
+) -> Result<String, SuiError> {
+    tx_results
+        .objects()
+        .objects
+        .iter()
+        .find(|obj| obj.object_type().contains(object_type))
+        .map(|obj| obj.object_id().to_string())
+        .ok_or_else(|| {
+            SuiError::NotFound(format!(
+                "No {object_type} object found in tx results"
+            ))
+        })
 }
 
 pub async fn fetch_walrus_system_params(
     client: Arc<Client>,
-) -> Result<WalrusSystemParams, SuiError> {
+) -> Result<(u64, u16), SuiError> {
     let parent_id: Address = WALRUS_SYSTEM
         .parse()
         .map_err(|e| SuiError::ParseError(format!("Invalid WALRUS_SYSTEM constant: {e}")))?;
@@ -158,8 +165,5 @@ pub async fn fetch_walrus_system_params(
         _ => return Err(SuiError::ParseError("Missing n_shards in committee".into())),
     };
 
-    Ok(WalrusSystemParams {
-        price_per_unit_size,
-        n_shards,
-    })
+    Ok((price_per_unit_size, n_shards))
 }

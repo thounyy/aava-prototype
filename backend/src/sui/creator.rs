@@ -16,7 +16,7 @@ use crate::walrus::{blob::CertificateData, tip::TipPayment};
 pub async fn account_exists(client: Arc<Client>, account_id: Address) -> Result<bool, SuiError> {
     let obj = read::get_object(client, account_id).await?;
     Ok(obj
-        .object_type_opt()
+        .object_type
         .is_some_and(|t| t.contains(&format!("{}::creator::Account", AAVA_PACKAGE))))
 }
 
@@ -26,13 +26,14 @@ pub async fn get_account(
 ) -> Result<(Vec<String>, HashMap<String, String>), SuiError> {
     let obj = read::get_object(client, account_id).await?;
 
-    if !obj
-        .object_type_opt()
-        .is_some_and(|t| t == &format!("{}::creator::Account", AAVA_PACKAGE))
-    {
+    let expected_type = format!("{}::creator::Account", AAVA_PACKAGE);
+    let actual_type = obj.object_type_opt();
+
+    if actual_type.as_deref() != Some(expected_type.as_str()) {
         return Err(SuiError::InvalidInput(format!(
-            "Object {account_id} is not a creator::Account (type={})",
-            obj.object_type_opt().unwrap_or_default()
+            "Object {account_id} has unexpected type (expected `{}`, got `{}`)",
+            expected_type,
+            actual_type.unwrap_or("<missing>")
         )));
     }
 
