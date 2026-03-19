@@ -10,8 +10,21 @@ pub mod streams;
 
 // Re-export session types and functions
 pub use sessions::{
-    close_session, open_session, CloseSessionRequest, CloseSessionResponse, OpenSessionRequest,
+    close_session,
+    flag_session,
+    revoke_session,
+    get_session,
+    CloseSessionRequest,
+    CloseSessionResponse,
+    FlagSessionRequest,
+    FlagSessionResponse,
+    OpenSessionRequest,
     OpenSessionResponse,
+    RevokeSessionRequest,
+    RevokeSessionResponse,
+    GetSessionRequest,
+    GetSessionResponse,
+    open_session,
 };
 
 // Re-export stream types and functions

@@ -79,7 +79,10 @@ pub struct OpenSessionRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OpenSessionResponse {
+    pub viewer_id: String,
+    pub stream_id: String,
     pub session_id: String,
+    pub status: String,
 }
 
 pub async fn open_session(
@@ -112,11 +115,10 @@ pub async fn open_session(
     // Value: JSON string of session data
     // TTL: 24 hours (86400 seconds) as safety net
     let session_key = format!("session:{}", session_id);
-    let session_json = serde_json::to_string(&session_data)
-        .map_err(|e| {
-            error!("Failed to serialize session: {}", e);
-            EnclaveError::ParseError(format!("Failed to serialize session: {}", e))
-        })?;
+    let session_json = serde_json::to_string(&session_data).map_err(|e| {
+        error!("Failed to serialize session: {}", e);
+        EnclaveError::ParseError(format!("Failed to serialize session: {}", e))
+    })?;
 
     // Add session to stream's session set
     let stream_sessions_key = format!("stream:{}:sessions", request.stream_id);
@@ -137,7 +139,96 @@ pub async fn open_session(
 
     info!("Session {} created successfully in Redis", session_id);
 
-    Ok(Json(OpenSessionResponse { session_id }))
+    Ok(Json(OpenSessionResponse {
+        viewer_id: request.viewer_id,
+        stream_id: request.stream_id,
+        session_id,
+        status: SessionStatus::Opened.as_str().to_string(),
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FlagSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FlagSessionResponse {
+    pub session_id: String,
+    pub status: String,
+}
+
+pub async fn flag_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<FlagSessionRequest>,
+) -> Result<Json<FlagSessionResponse>, EnclaveError> {
+    require_internal_auth(&headers)?;
+    info!("Flagging session {}", request.session_id);
+
+    let mut redis = state.redis.clone();
+    let mut session_data = get_session_record(&mut redis, &request.session_id).await?;
+    session_data.transition_to(SessionStatus::Flagged)?;
+
+    let updated_json = serde_json::to_string(&session_data).map_err(|e| {
+        error!("Failed to serialize updated session: {}", e);
+        EnclaveError::ParseError(format!("Failed to serialize updated session: {}", e))
+    })?;
+
+    let _: () = redis
+        .set(&format!("session:{}", &request.session_id), &updated_json)
+        .await
+        .map_err(|e| {
+            error!("Redis error updating session: {}", e);
+            EnclaveError::RedisError(format!("Failed to flag session: {}", e))
+        })?;
+
+    Ok(Json(FlagSessionResponse {
+        session_id: request.session_id,
+        status: session_data.status.as_str().to_string(),
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RevokeSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RevokeSessionResponse {
+    pub session_id: String,
+    pub status: String,
+}
+
+pub async fn revoke_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<RevokeSessionRequest>,
+) -> Result<Json<RevokeSessionResponse>, EnclaveError> {
+    require_internal_auth(&headers)?;
+    info!("Revoking session {}", request.session_id);
+
+    let mut redis = state.redis.clone();
+    let mut session_data = get_session_record(&mut redis, &request.session_id).await?;
+    session_data.transition_to(SessionStatus::Revoked)?;
+
+    let updated_json = serde_json::to_string(&session_data).map_err(|e| {
+        error!("Failed to serialize updated session: {}", e);
+        EnclaveError::ParseError(format!("Failed to serialize updated session: {}", e))
+    })?;
+
+    let _: () = redis
+        .set(&format!("session:{}", &request.session_id), &updated_json)
+        .await
+        .map_err(|e| {
+            error!("Redis error updating session: {}", e);
+            EnclaveError::RedisError(format!("Failed to revoke session: {}", e))
+        })?;
+
+    Ok(Json(RevokeSessionResponse {
+        session_id: request.session_id,
+        status: session_data.status.as_str().to_string(),
+    }))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -147,7 +238,8 @@ pub struct CloseSessionRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CloseSessionResponse {
-    pub stream_id: String,
+    pub session_id: String,
+    pub status: String,
 }
 
 pub async fn close_session(
@@ -156,7 +248,7 @@ pub async fn close_session(
     Json(request): Json<CloseSessionRequest>,
 ) -> Result<Json<CloseSessionResponse>, EnclaveError> {
     require_internal_auth(&headers)?;
-    info!("Closing session {}", request.session_id);
+    info!("Closing session {}", &request.session_id);
 
     let mut redis = state.redis.clone();
 
@@ -168,15 +260,55 @@ pub async fn close_session(
         EnclaveError::ParseError(format!("Failed to serialize updated session: {}", e))
     })?;
 
-    let _: () = redis.set(&format!("session:{}", request.session_id), &updated_json).await.map_err(|e| {
-        error!("Redis error updating session: {}", e);
-        EnclaveError::RedisError(format!("Failed to close session: {}", e))
-    })?;
+    let _: () = redis
+        .set(&format!("session:{}", &request.session_id), &updated_json)
+        .await
+        .map_err(|e| {
+            error!("Redis error updating session: {}", e);
+            EnclaveError::RedisError(format!("Failed to close session: {}", e))
+        })?;
 
     info!("Session {} closed successfully", request.session_id);
 
     Ok(Json(CloseSessionResponse {
+        session_id: request.session_id,
+        status: session_data.status.as_str().to_string(),
+    }))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetSessionResponse {
+    pub session_id: String,
+    pub viewer_id: String,
+    pub stream_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub async fn get_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<GetSessionRequest>,
+) -> Result<Json<GetSessionResponse>, EnclaveError> {
+    require_internal_auth(&headers)?;
+    info!("Getting session status for {}", request.session_id);
+
+    let mut redis = state.redis.clone();
+    let session_data = get_session_record(&mut redis, &request.session_id).await?;
+
+    Ok(Json(GetSessionResponse {
+        session_id: session_data.session_id,
+        status: session_data.status.as_str().to_string(),
+        viewer_id: session_data.viewer_id,
         stream_id: session_data.stream_id,
+        created_at: session_data.created_at,
+        updated_at: session_data.updated_at,
     }))
 }
 

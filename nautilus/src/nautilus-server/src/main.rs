@@ -4,7 +4,10 @@
 use anyhow::Result;
 use axum::{routing::get, routing::post, Router};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
-use nautilus_server::app::{cleanup_stream, close_session, end_stream, open_session};
+use nautilus_server::app::{
+    cleanup_stream, close_session, end_stream, flag_session, get_session, open_session,
+    revoke_session,
+};
 use nautilus_server::common::{get_attestation, health_check};
 use nautilus_server::AppState;
 use redis::aio::ConnectionManager;
@@ -14,6 +17,8 @@ use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
+    
     let eph_kp = Ed25519KeyPair::generate(&mut rand::thread_rng());
     let _internal_token = std::env::var("ENCLAVE_INTERNAL_TOKEN")
         .map_err(|_| anyhow::anyhow!("ENCLAVE_INTERNAL_TOKEN must be defined"))?;
@@ -43,6 +48,9 @@ async fn main() -> Result<()> {
     let internal_routes = Router::new()
         .route("/sessions/open", post(open_session))
         .route("/sessions/close", post(close_session))
+        .route("/sessions/flag", post(flag_session))
+        .route("/sessions/revoke", post(revoke_session))
+        .route("/sessions/get", post(get_session))
         .route("/streams/end", post(end_stream))
         .route("/streams/cleanup", post(cleanup_stream));
 

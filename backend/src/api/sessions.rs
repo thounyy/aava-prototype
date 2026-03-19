@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
-use axum::{
-    response::Json,
-    routing::post,
-    Router,
-};
+use axum::{response::Json, routing::post, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::info;
@@ -16,8 +12,16 @@ use crate::AppState;
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/sessions/open", post(open_session))
-        // TODO: add a route to check session for flag
+        .route("/api/sessions/flag", post(flag_session))
+        .route("/api/sessions/revoke", post(revoke_session))
         .route("/api/sessions/close", post(close_session))
+        .route("/api/sessions/get", post(get_session))
+        .route("/api/sessions/status", post(session_status))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionIdRequest {
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,9 +68,39 @@ async fn open_session(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloseSessionRequest {
-    pub viewer_identifier: String,
+pub struct FlagSessionResponse {
     pub session_id: String,
+    pub status: String,
+}
+
+async fn flag_session(
+    Json(req): Json<SessionIdRequest>,
+) -> Result<Json<FlagSessionResponse>, AppError> {
+    info!("Flagging session {}", req.session_id);
+
+    let enclave_response = enclave::session::flag_session(&req.session_id).await?;
+    Ok(Json(FlagSessionResponse {
+        session_id: enclave_response.session_id,
+        status: enclave_response.status,
+    }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevokeSessionResponse {
+    pub session_id: String,
+    pub status: String,
+}
+
+async fn revoke_session(
+    Json(req): Json<SessionIdRequest>,
+) -> Result<Json<RevokeSessionResponse>, AppError> {
+    info!("Revoking session {}", req.session_id);
+
+    let enclave_response = enclave::session::revoke_session(&req.session_id).await?;
+    Ok(Json(RevokeSessionResponse {
+        session_id: enclave_response.session_id,
+        status: enclave_response.status,
+    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,17 +110,58 @@ pub struct CloseSessionResponse {
 }
 
 async fn close_session(
-    Json(req): Json<CloseSessionRequest>,
+    Json(req): Json<SessionIdRequest>,
 ) -> Result<Json<CloseSessionResponse>, AppError> {
-    info!(
-        "Closing session {} for viewer {}",
-        req.session_id, req.viewer_identifier
-    );
+    info!("Closing session {}", req.session_id);
 
     let enclave_response = enclave::session::close_session(&req.session_id).await?;
 
     Ok(Json(CloseSessionResponse {
         session_id: enclave_response.session_id,
         status: SessionStatus::Closed,
+    }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetSessionResponse {
+    pub session_id: String,
+    pub viewer_id: String,
+    pub stream_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+async fn get_session(
+    Json(req): Json<SessionIdRequest>,
+) -> Result<Json<GetSessionResponse>, AppError> {
+    info!("Getting session {}", req.session_id);
+
+    let enclave_response = enclave::session::get_session(&req.session_id).await?;
+
+    Ok(Json(GetSessionResponse {
+        session_id: enclave_response.session_id,
+        viewer_id: enclave_response.viewer_id,
+        stream_id: enclave_response.stream_id,
+        status: enclave_response.status,
+        created_at: enclave_response.created_at,
+        updated_at: enclave_response.updated_at,
+    }))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionStatusResponse {
+    pub status: String,
+}
+
+async fn session_status(
+    Json(req): Json<SessionIdRequest>,
+) -> Result<Json<SessionStatusResponse>, AppError> {
+    info!("Getting session status {}", req.session_id);
+
+    let enclave_response = enclave::session::get_session(&req.session_id).await?;
+
+    Ok(Json(SessionStatusResponse {
+        status: enclave_response.status,
     }))
 }

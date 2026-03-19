@@ -55,7 +55,7 @@ pub fn find_object_id_from_tx_results(
         .objects()
         .objects
         .iter()
-        .find(|obj| obj.object_type().contains(object_type))
+        .find(|obj| obj.object_type() == object_type)
         .map(|obj| obj.object_id().to_string())
         .ok_or_else(|| {
             SuiError::NotFound(format!(
