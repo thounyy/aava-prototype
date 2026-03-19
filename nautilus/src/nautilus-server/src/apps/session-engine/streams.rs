@@ -1,10 +1,11 @@
 // Copyright (c), Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use super::sessions::SessionRecord;
 use crate::common::{to_signed_response, IntentMessage, IntentScope, ProcessedDataResponse};
+use crate::require_internal_auth;
 use crate::AppState;
 use crate::EnclaveError;
-use crate::require_internal_auth;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
@@ -19,6 +20,16 @@ use walrus_core::{
     metadata::BlobMetadataApi,
     EncodingType,
 };
+
+/// Session data structure for batch processing
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SessionData {
+    pub session_id: String,
+    pub viewer_id: String,
+    pub stream_id: String,
+    pub status: String,
+    pub created_at: String,
+}
 
 /// Request payload for ending a stream
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,22 +53,6 @@ pub struct EndStreamResponse {
     pub encoded_size: u64,
 }
 
-/// Request payload for cleaning up sessions after Walrus upload
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CleanupStreamRequest {
-    pub stream_id: String,
-}
-
-/// Session data structure for batch processing
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SessionData {
-    pub session_id: String,
-    pub viewer_id: String,
-    pub stream_id: String,
-    pub status: String,
-    pub created_at: String,
-}
-
 /// End a stream
 ///
 /// This function:
@@ -78,13 +73,14 @@ pub async fn end_stream(
     );
 
     let mut redis = state.redis.clone();
-    let stream_sessions_key = format!("stream:{}:sessions", request.stream_id);
 
-    // Get all session IDs for this stream
-    let session_ids: Vec<String> = redis.smembers(&stream_sessions_key).await.map_err(|e| {
-        error!("Redis error querying stream sessions: {}", e);
-        EnclaveError::RedisError(format!("Failed to query sessions: {}", e))
-    })?;
+    let session_ids: Vec<String> = redis
+        .smembers(&format!("stream:{}:sessions", request.stream_id))
+        .await
+        .map_err(|e| {
+            error!("Redis error querying stream sessions: {}", e);
+            EnclaveError::RedisError(format!("Failed to query sessions: {}", e))
+        })?;
 
     let sessions_count = session_ids.len() as u64;
     info!(
@@ -109,7 +105,7 @@ pub async fn end_stream(
         })?;
 
         if let Some(json) = session_json {
-            let session_value: serde_json::Value = serde_json::from_str(&json).map_err(|e| {
+            let session_value: SessionRecord = serde_json::from_str(&json).map_err(|e| {
                 EnclaveError::ParseError(format!(
                     "Failed to parse session data for {}: {}",
                     session_id, e
@@ -117,31 +113,17 @@ pub async fn end_stream(
             })?;
 
             sessions.push(SessionData {
-                session_id: session_value["session_id"]
-                    .as_str()
-                    .unwrap_or(session_id)
-                    .to_string(),
-                viewer_id: session_value["viewer_id"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
-                stream_id: session_value["stream_id"]
-                    .as_str()
-                    .unwrap_or(&request.stream_id)
-                    .to_string(),
-                status: session_value["status"].as_str().unwrap_or("").to_string(),
-                created_at: session_value["created_at"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string(),
+                session_id: session_value.session_id,
+                viewer_id: session_value.viewer_id,
+                stream_id: session_value.stream_id,
+                status: session_value.status.as_str().to_string(),
+                created_at: session_value.created_at,
             });
         }
     }
 
     // Sort by created_at for consistency
     sessions.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-
-    let sessions_count = sessions.len() as u64;
 
     // Serialize session data and compute Walrus blob metadata for verification.
     let data_json = serde_json::to_string(&sessions)
@@ -184,66 +166,74 @@ pub async fn end_stream(
     Ok(Json(signed_response))
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CleanupStreamRequest {
+    pub stream_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CleanupStreamResponse {
+    pub deleted_count: u64,
+}
+
 /// Cleanup stream data after successful Walrus upload
 /// Deletes all sessions for a stream from Redis
 pub async fn cleanup_stream(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(request): Json<CleanupStreamRequest>,
-) -> Result<Json<serde_json::Value>, EnclaveError> {
+) -> Result<Json<CleanupStreamResponse>, EnclaveError> {
     require_internal_auth(&headers)?;
     info!("Cleaning up sessions for stream {}", request.stream_id);
 
     let mut redis = state.redis.clone();
-    let stream_sessions_key = format!("stream:{}:sessions", request.stream_id);
 
-    // Get all session IDs for this stream
-    let session_ids: Vec<String> = redis.smembers(&stream_sessions_key).await.map_err(|e| {
-        error!("Redis error querying stream sessions: {}", e);
-        EnclaveError::RedisError(format!("Failed to query sessions: {}", e))
-    })?;
+    let session_ids: Vec<String> = redis
+        .smembers(&format!("stream:{}:sessions", request.stream_id))
+        .await
+        .map_err(|e| {
+            error!("Redis error querying stream sessions: {}", e);
+            EnclaveError::RedisError(format!("Failed to query sessions: {}", e))
+        })?;
 
     if session_ids.is_empty() {
         warn!(
             "No sessions found to cleanup for stream {}",
             request.stream_id
         );
-        return Ok(Json(serde_json::json!({
-            "stream_id": request.stream_id,
-            "deleted_count": 0,
-            "status": "completed"
-        })));
+        return Ok(Json(CleanupStreamResponse { deleted_count: 0 }));
     }
 
     // Delete all session keys and the stream set
     let mut deleted_count = 0u64;
     for session_id in &session_ids {
-        let session_key = format!("session:{}", session_id);
-        let deleted: bool = redis.del(&session_key).await.map_err(|e| {
-            error!("Redis error deleting session {}: {}", session_id, e);
-            EnclaveError::RedisError(format!("Failed to delete session {}: {}", session_id, e))
-        })?;
+        let deleted: bool = redis
+            .del(&format!("session:{}", session_id))
+            .await
+            .map_err(|e| {
+                error!("Redis error deleting session {}: {}", session_id, e);
+                EnclaveError::RedisError(format!("Failed to delete session {}: {}", session_id, e))
+            })?;
         if deleted {
             deleted_count += 1;
         }
     }
 
     // Delete the stream sessions set
-    let _: () = redis.del(&stream_sessions_key).await.map_err(|e| {
-        error!("Redis error deleting stream sessions set: {}", e);
-        EnclaveError::RedisError(format!("Failed to delete stream sessions set: {}", e))
-    })?;
+    let _: () = redis
+        .del(&format!("stream:{}:sessions", request.stream_id))
+        .await
+        .map_err(|e| {
+            error!("Redis error deleting stream sessions set: {}", e);
+            EnclaveError::RedisError(format!("Failed to delete stream sessions set: {}", e))
+        })?;
 
     info!(
         "Cleaned up {} sessions for stream {}",
         deleted_count, request.stream_id
     );
 
-    Ok(Json(serde_json::json!({
-        "stream_id": request.stream_id,
-        "deleted_count": deleted_count,
-        "status": "completed"
-    })))
+    Ok(Json(CleanupStreamResponse { deleted_count }))
 }
 
 struct WalrusMetadata {
@@ -256,9 +246,7 @@ struct WalrusMetadata {
 }
 
 fn compute_walrus_metadata(n_shards: u16, blob: &[u8]) -> Result<WalrusMetadata, anyhow::Error> {
-    // TODO: modify for production
     let n_shards = NonZeroU16::new(n_shards).unwrap();
-
     let config = EncodingConfig::new(n_shards).get_for_type(EncodingType::RS2);
     let metadata = config.compute_metadata(blob)?;
 
