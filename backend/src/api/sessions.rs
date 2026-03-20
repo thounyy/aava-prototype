@@ -12,11 +12,8 @@ use crate::AppState;
 pub fn create_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/sessions/open", post(open_session))
-        .route("/api/sessions/flag", post(flag_session))
-        .route("/api/sessions/revoke", post(revoke_session))
         .route("/api/sessions/close", post(close_session))
         .route("/api/sessions/get", post(get_session))
-        .route("/api/sessions/status", post(session_status))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,42 +65,6 @@ async fn open_session(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FlagSessionResponse {
-    pub session_id: String,
-    pub status: String,
-}
-
-async fn flag_session(
-    Json(req): Json<SessionIdRequest>,
-) -> Result<Json<FlagSessionResponse>, AppError> {
-    info!("Flagging session {}", req.session_id);
-
-    let enclave_response = enclave::session::flag_session(&req.session_id).await?;
-    Ok(Json(FlagSessionResponse {
-        session_id: enclave_response.session_id,
-        status: enclave_response.status,
-    }))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RevokeSessionResponse {
-    pub session_id: String,
-    pub status: String,
-}
-
-async fn revoke_session(
-    Json(req): Json<SessionIdRequest>,
-) -> Result<Json<RevokeSessionResponse>, AppError> {
-    info!("Revoking session {}", req.session_id);
-
-    let enclave_response = enclave::session::revoke_session(&req.session_id).await?;
-    Ok(Json(RevokeSessionResponse {
-        session_id: enclave_response.session_id,
-        status: enclave_response.status,
-    }))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloseSessionResponse {
     pub session_id: String,
     pub status: SessionStatus,
@@ -146,22 +107,5 @@ async fn get_session(
         status: enclave_response.status,
         created_at: enclave_response.created_at,
         updated_at: enclave_response.updated_at,
-    }))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionStatusResponse {
-    pub status: String,
-}
-
-async fn session_status(
-    Json(req): Json<SessionIdRequest>,
-) -> Result<Json<SessionStatusResponse>, AppError> {
-    info!("Getting session status {}", req.session_id);
-
-    let enclave_response = enclave::session::get_session(&req.session_id).await?;
-
-    Ok(Json(SessionStatusResponse {
-        status: enclave_response.status,
     }))
 }
