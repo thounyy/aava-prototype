@@ -17,6 +17,7 @@ use aava::{
     account_registry::AccountRegistry,
     protocol_authority::CreatorRequest,
     blob_id::{Self, BLOB_ID},
+    viewer::Account as ViewerAccount,
 };
 
 // === Aliases ===
@@ -24,12 +25,14 @@ use aava::{
 use fun dof::add as UID.add;
 use fun dof::remove as UID.remove;
 use fun dof::borrow_mut as UID.borrow_mut;
+use fun dof::exists_ as UID.exists;
 
 // === Errors ===
 
 const ENotMember: u64 = 0;
 const EStreamNotActive: u64 = 1;
 const EStreamNotVerified: u64 = 2;
+const EStreamNotFound: u64 = 3;
 
 // === Constants ===
 
@@ -43,6 +46,8 @@ const STORED: u8 = 3; // blob stored on walrus
 /// Parent struct protecting the config.
 public struct Account has key {
     id: UID,
+    // off-chain app user handle (used to derive the account ID)
+    handle: String,
     // addresses of the creators, there can by multiple owners
     members: VecSet<address>,
     // additional metadata
@@ -66,10 +71,11 @@ public struct BlobKey() has copy, drop, store;
 public fun new_account_for_testing(
     registry: &mut AccountRegistry,
     addr: address,
-    username: String,
+    handle: String,
 ) {
     let account = Account {
-        id: derived_object::claim(registry.uid_mut(), username),
+        id: derived_object::claim(registry.uid_mut(), handle),
+        handle,
         members: vec_set::from_keys(vector[addr]),
         metadata: vec_map::empty(),
     };
@@ -81,14 +87,15 @@ public fun new_account(
     registry: &mut AccountRegistry,
     request: CreatorRequest,
 ) {
-    let (addr, username) = request.complete();
+    let (addr, handle) = request.complete();
 
     let account = Account {
-        id: derived_object::claim(registry.uid_mut(), username),
+        id: derived_object::claim(registry.uid_mut(), handle),
+        handle,
         members: vec_set::from_keys(vector[addr]),
         metadata: vec_map::from_keys_values(
-            vector["username"], // TODO: add more metadata if necessary
-            vector[username]
+            vector["handle"], // TODO: add more metadata if necessary
+            vector[handle]
         ),
     };
 
@@ -110,6 +117,8 @@ public fun create_stream(
     
     account.id.add(key, stream);
 }
+
+// --- Walrus ---
 
 public fun verify_and_store_blob(
     account: &mut Account,
@@ -201,6 +210,31 @@ public fun destroy_blob(
     storage.destroy();
 
     stream.status = STORED;
+}
+
+// --- Actions ---
+
+public fun flag_session(
+    account: &mut Account,
+    viewer: &mut ViewerAccount,
+    session_id: String,
+    stream_id: ID,
+    kind: u8, // 0 = warned, 1 = revoked
+    reason: String,
+    timestamp_ms: u64,
+    ctx: &mut TxContext,
+) {
+    assert!(account.is_member(ctx.sender()), ENotMember);
+    assert!(account.id.exists(session_id), EStreamNotFound);
+
+    viewer.add_sanction(
+        session_id,
+        stream_id,
+        account.id.to_inner(),
+        kind,
+        reason,
+        timestamp_ms,
+    );
 }
 
 // === View functions ===
