@@ -54,7 +54,12 @@ async fn create_viewer_account(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetAccountResponse {
+    pub object_id: String,
+    pub handle: String,
+    /// Claimed owner address (`viewer::Account.owner`), if any.
     pub addr: Option<String>,
+    pub protocol: String,
+    pub sanctions: Vec<sui::viewer::ViewerSanction>,
     pub metadata: HashMap<String, String>,
 }
 
@@ -63,9 +68,16 @@ async fn get_viewer_account(
     Json(req): Json<AccountHandleRequest>,
 ) -> Result<Json<GetAccountResponse>, AppError> {
     let account_id = sui::read::derive_account_id(&req.account_handle)?;
-    let (addr, metadata) = sui::viewer::get_account(state.sui_client.clone(), account_id).await?;
+    let account = sui::viewer::get_account(state.sui_client.clone(), account_id).await?;
 
-    Ok(Json(GetAccountResponse { addr, metadata }))
+    Ok(Json(GetAccountResponse {
+        object_id: account.id,
+        handle: account.handle,
+        addr: account.owner,
+        protocol: account.protocol,
+        sanctions: account.sanctions,
+        metadata: account.metadata,
+    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

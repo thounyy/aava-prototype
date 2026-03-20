@@ -1,4 +1,4 @@
-curl -X POST "http://127.0.0.1:8080/api/creators" \
+curl -X POST "http://127.0.0.1:8080/api/creators/create" \
   -H "Content-Type: application/json" \
   -d '{"account_handle":"thouny"}'
 

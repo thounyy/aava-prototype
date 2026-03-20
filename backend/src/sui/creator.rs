@@ -1,7 +1,7 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine};
-use prost_types::value::Kind;
+use serde::Deserialize;
 use sui_rpc::Client;
 use sui_sdk_types::{Address, StructTag, Transaction};
 use sui_transaction_builder::{intent::CoinWithBalance, Function, ObjectInput, TransactionBuilder};
@@ -13,6 +13,62 @@ use crate::sui::error::SuiError;
 use crate::sui::read;
 use crate::walrus::{blob::CertificateData, tip::TipPayment};
 
+pub struct CreatorAccount {
+    pub id: String,
+    pub handle: String,
+    pub members: Vec<String>,
+    pub metadata: HashMap<String, String>,
+}
+
+/// BCS layout must match `aava::creator::Account` in Move (field order + `sui::vec_set` / `sui::vec_map` shapes).
+#[derive(Debug, Deserialize)]
+struct MoveVecSet<T> {
+    contents: Vec<T>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MoveVecMapEntry {
+    key: String,
+    value: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MoveVecMap {
+    contents: Vec<MoveVecMapEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MoveAccount {
+    id: Address,
+    handle: String,
+    members: MoveVecSet<Address>,
+    metadata: MoveVecMap,
+}
+
+impl From<MoveAccount> for CreatorAccount {
+    fn from(m: MoveAccount) -> Self {
+        let members = m
+            .members
+            .contents
+            .into_iter()
+            .map(|a| a.to_string())
+            .collect();
+        let metadata = m
+            .metadata
+            .contents
+            .into_iter()
+            .map(|e| (e.key, e.value))
+            .collect();
+
+        Self {
+            id: m.id.to_string(),
+            handle: m.handle,
+            members,
+            metadata,
+        }
+    }
+}
+
 pub async fn account_exists(client: Arc<Client>, account_id: Address) -> Result<bool, SuiError> {
     let obj = read::get_object(client, account_id).await?;
     Ok(obj
@@ -23,7 +79,7 @@ pub async fn account_exists(client: Arc<Client>, account_id: Address) -> Result<
 pub async fn get_account(
     client: Arc<Client>,
     account_id: Address,
-) -> Result<(Vec<String>, HashMap<String, String>), SuiError> {
+) -> Result<CreatorAccount, SuiError> {
     let obj = read::get_object(client, account_id).await?;
 
     let expected_type = format!("{}::creator::Account", AAVA_PACKAGE);
@@ -37,82 +93,19 @@ pub async fn get_account(
         )));
     }
 
-    let fields = match obj.json_opt().and_then(|v| v.kind.as_ref()) {
-        Some(Kind::StructValue(s)) => &s.fields,
-        _ => {
-            return Err(SuiError::ParseError(format!(
-                "Missing JSON fields for creator::Account {account_id}"
-            )))
-        }
-    };
+    let bytes = obj
+        .contents
+        .unwrap_or_default()
+        .value
+        .ok_or_else(|| SuiError::RpcError("RPC object missing `contents`".into()))?;
 
-    let members_value = fields
-        .get("members")
-        .ok_or_else(|| SuiError::ParseError("Missing members field".into()))?;
-    let members = members_value
-        .kind
-        .as_ref()
-        .and_then(|k| match k {
-            Kind::StructValue(s) => s.fields.get("contents"),
-            _ => None,
-        })
-        .and_then(|contents| contents.kind.as_ref())
-        .and_then(|k| match k {
-            Kind::ListValue(list) => Some(list),
-            _ => None,
-        })
-        .map(|list| {
-            list.values
-                .iter()
-                .filter_map(|v| match v.kind.as_ref() {
-                    Some(Kind::StringValue(s)) => Some(s.clone()),
-                    _ => None,
-                })
-                .collect::<Vec<String>>()
-        })
-        .ok_or_else(|| SuiError::ParseError("members.contents.values is missing".into()))?;
+    let parsed: MoveAccount = bcs::from_bytes(&bytes).map_err(|e| {
+        SuiError::ParseError(format!(
+            "BCS decode creator::Account {account_id}: {e} (layout must match Move struct)"
+        ))
+    })?;
 
-    let metadata = fields
-        .get("metadata")
-        .and_then(|m| m.kind.as_ref())
-        .and_then(|k| match k {
-            Kind::StructValue(s) => s.fields.get("contents"),
-            _ => None,
-        })
-        .and_then(|contents| contents.kind.as_ref())
-        .and_then(|k| match k {
-            Kind::ListValue(list) => Some(list),
-            _ => None,
-        })
-        .map(|list| {
-            list.values
-                .iter()
-                .filter_map(|item| match item.kind.as_ref() {
-                    Some(Kind::StructValue(entry)) => {
-                        let key = entry
-                            .fields
-                            .get("key")
-                            .and_then(|v| match v.kind.as_ref() {
-                                Some(Kind::StringValue(s)) => Some(s.clone()),
-                                _ => None,
-                            })?;
-                        let val =
-                            entry
-                                .fields
-                                .get("value")
-                                .and_then(|v| match v.kind.as_ref() {
-                                    Some(Kind::StringValue(s)) => Some(s.clone()),
-                                    _ => None,
-                                })?;
-                        Some((key, val))
-                    }
-                    _ => None,
-                })
-                .collect::<HashMap<String, String>>()
-        })
-        .unwrap_or_default();
-
-    Ok((members, metadata))
+    Ok(parsed.into())
 }
 
 // TODO: modify for production

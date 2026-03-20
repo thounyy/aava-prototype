@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::extract::State;
 use axum::{response::Json, routing::post, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,7 @@ use tracing::info;
 
 use crate::enclave;
 use crate::error::AppError;
+use crate::sui;
 use crate::AppState;
 
 pub fn create_router() -> Router<Arc<AppState>> {
@@ -31,7 +33,7 @@ pub enum SessionStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenSessionRequest {
-    pub viewer_identifier: String,
+    pub viewer_handle: String,
     pub stream_id: String,
 }
 
@@ -45,15 +47,25 @@ pub struct OpenSessionResponse {
 }
 
 async fn open_session(
+    State(state): State<Arc<AppState>>,
     Json(req): Json<OpenSessionRequest>,
 ) -> Result<Json<OpenSessionResponse>, AppError> {
     info!(
         "Opening session for viewer {} on stream {}",
-        req.viewer_identifier, req.stream_id
+        req.viewer_handle, req.stream_id
     );
 
+    let viewer_id = sui::read::derive_account_id(&req.viewer_handle)?;
+    // TODO: add more checks
+    if !sui::viewer::account_exists(state.sui_client.clone(), viewer_id).await? {
+        return Err(AppError::BadRequest(format!(
+            "Viewer account {} does not exist on-chain",
+            req.viewer_handle
+        )));
+    }
+
     let enclave_response =
-        enclave::session::open_session(&req.viewer_identifier, &req.stream_id).await?;
+        enclave::session::open_session(&viewer_id.to_string(), &req.stream_id).await?;
 
     Ok(Json(OpenSessionResponse {
         session_id: enclave_response.session_id,

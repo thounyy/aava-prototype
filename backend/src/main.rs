@@ -23,6 +23,7 @@ async fn main() -> anyhow::Result<()> {
         .merge(api::viewer::create_router())
         .merge(api::sessions::create_router())
         .merge(api::streams::create_router())
+        .merge(api::actions::create_router())
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8080));

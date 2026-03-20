@@ -55,8 +55,9 @@ async fn create_creator_account(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetAccountResponse {
-    members: Vec<String>,
-    metadata: HashMap<String, String>,
+    pub handle: String,
+    pub members: Vec<String>,
+    pub metadata: HashMap<String, String>,
 }
 
 async fn get_creator_account(
@@ -64,10 +65,13 @@ async fn get_creator_account(
     Json(req): Json<AccountHandleRequest>,
 ) -> Result<Json<GetAccountResponse>, AppError> {
     let account_id = sui::read::derive_account_id(&req.account_handle)?;
-    let (members, metadata) =
-        sui::creator::get_account(state.sui_client.clone(), account_id).await?;
+    let account = sui::creator::get_account(state.sui_client.clone(), account_id).await?;
 
-    Ok(Json(GetAccountResponse { members, metadata }))
+    Ok(Json(GetAccountResponse {
+        handle: account.handle,
+        members: account.members,
+        metadata: account.metadata,
+    }))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
