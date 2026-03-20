@@ -93,10 +93,7 @@ public fun new_account(
         id: derived_object::claim(registry.uid_mut(), handle),
         handle,
         members: vec_set::from_keys(vector[addr]),
-        metadata: vec_map::from_keys_values(
-            vector["handle"], // TODO: add more metadata if necessary
-            vector[handle]
-        ),
+        metadata: vec_map::empty(),
     };
 
     transfer::share_object(account);
@@ -215,7 +212,7 @@ public fun destroy_blob(
 // --- Actions ---
 
 public fun flag_session(
-    account: &mut Account,
+    account: &Account,
     viewer: &mut ViewerAccount,
     session_id: String,
     stream_id: ID,
@@ -225,7 +222,7 @@ public fun flag_session(
     ctx: &mut TxContext,
 ) {
     assert!(account.is_member(ctx.sender()), ENotMember);
-    assert!(account.id.exists(session_id), EStreamNotFound);
+    assert!(account.id.exists(StreamKey(stream_id)), EStreamNotFound);
 
     viewer.add_sanction(
         session_id,

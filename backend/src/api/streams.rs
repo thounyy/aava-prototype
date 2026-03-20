@@ -25,7 +25,7 @@ pub fn create_router() -> Router<Arc<AppState>> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamStartRequest {
-    pub account_handle: String,
+    pub creator_handle: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,10 +38,10 @@ async fn start_stream(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StreamStartRequest>,
 ) -> Result<Json<StreamStartResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
+    let account_id = sui::read::derive_account_id(&req.creator_handle)?;
     info!(
-        "Creating stream for account_handle {} (derived account {})",
-        req.account_handle, account_id
+        "Creating stream for creator_handle {} (derived account {})",
+        req.creator_handle, account_id
     );
 
     let tx = sui::creator::build_create_stream_tx(
@@ -66,7 +66,7 @@ async fn start_stream(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamEndRequest {
-    pub account_handle: String,
+    pub creator_handle: String,
     pub stream_id: String,
 }
 
@@ -87,10 +87,10 @@ async fn end_stream(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StreamEndRequest>,
 ) -> Result<Json<StreamEndResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
+    let account_id = sui::read::derive_account_id(&req.creator_handle)?;
     info!(
-        "Ending stream {} for account_handle {} (derived account {})",
-        req.stream_id, req.account_handle, account_id
+        "Ending stream {} for creator_handle {} (derived account {})",
+        req.stream_id, req.creator_handle, account_id
     );
 
     // ── 1. Fetch Walrus system params ───────────────────────────────

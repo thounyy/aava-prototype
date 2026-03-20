@@ -17,30 +17,30 @@ pub fn create_router() -> Router<Arc<AppState>> {
 
 // TODO: hardcode for prototype
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountHandleRequest {
-    pub account_handle: String,
+pub struct CreatorHandleRequest {
+    pub creator_handle: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateCreatorAccountResponse {
     pub tx_digest: String,
-    pub account_id: String,
+    pub creator_id: String,
 }
 
 async fn create_creator_account(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AccountHandleRequest>,
+    Json(req): Json<CreatorHandleRequest>,
 ) -> Result<Json<CreateCreatorAccountResponse>, AppError> {
     info!(
-        "Creating creator account for account_handle {}",
-        req.account_handle
+        "Creating creator account for creator_handle {}",
+        req.creator_handle
     );
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
+    let creator_id = sui::read::derive_account_id(&req.creator_handle)?;
 
     let tx = sui::creator::build_create_account_tx(
         state.sui_client.clone(),
         sui::executor::wallet_address(),
-        req.account_handle,
+        req.creator_handle,
     )
     .await?;
     let tx_digest = tx.digest().to_string();
@@ -49,7 +49,7 @@ async fn create_creator_account(
 
     Ok(Json(CreateCreatorAccountResponse {
         tx_digest,
-        account_id: account_id.to_string(),
+        creator_id: creator_id.to_string(),
     }))
 }
 
@@ -62,10 +62,10 @@ pub struct GetAccountResponse {
 
 async fn get_creator_account(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AccountHandleRequest>,
+    Json(req): Json<CreatorHandleRequest>,
 ) -> Result<Json<GetAccountResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
-    let account = sui::creator::get_account(state.sui_client.clone(), account_id).await?;
+    let creator_id = sui::read::derive_account_id(&req.creator_handle)?;
+    let account = sui::creator::get_account(state.sui_client.clone(), creator_id).await?;
 
     Ok(Json(GetAccountResponse {
         handle: account.handle,
@@ -81,10 +81,10 @@ pub struct AccountExistsResponse {
 
 async fn creator_account_exists(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AccountHandleRequest>,
+    Json(req): Json<CreatorHandleRequest>,
 ) -> Result<Json<AccountExistsResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
-    let exists = sui::creator::account_exists(state.sui_client.clone(), account_id).await?;
+    let creator_id = sui::read::derive_account_id(&req.creator_handle)?;
+    let exists = sui::creator::account_exists(state.sui_client.clone(), creator_id).await?;
 
     Ok(Json(AccountExistsResponse { exists }))
 }

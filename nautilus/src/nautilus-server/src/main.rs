@@ -5,8 +5,8 @@ use anyhow::Result;
 use axum::{routing::get, routing::post, Router};
 use fastcrypto::{ed25519::Ed25519KeyPair, traits::KeyPair};
 use nautilus_server::app::{
-    cleanup_stream, close_session, end_stream, flag_session, get_session, open_session,
-    revoke_session,
+    cleanup_stream, close_session, end_stream, get_session, open_session, revoke_session,
+    warn_session,
 };
 use nautilus_server::common::{get_attestation, health_check};
 use nautilus_server::AppState;
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
     let internal_routes = Router::new()
         .route("/sessions/open", post(open_session))
         .route("/sessions/close", post(close_session))
-        .route("/sessions/flag", post(flag_session))
+        .route("/sessions/warn", post(warn_session))
         .route("/sessions/revoke", post(revoke_session))
         .route("/sessions/get", post(get_session))
         .route("/streams/end", post(end_stream))

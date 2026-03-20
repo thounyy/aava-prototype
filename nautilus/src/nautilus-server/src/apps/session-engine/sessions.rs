@@ -18,7 +18,7 @@ use uuid::Uuid;
 #[serde(rename_all = "lowercase")]
 pub(crate) enum SessionStatus {
     Opened,
-    Flagged,
+    Warned,
     Revoked,
     Closed,
 }
@@ -27,7 +27,7 @@ impl SessionStatus {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Opened => "opened",
-            Self::Flagged => "flagged",
+            Self::Warned => "warned",
             Self::Revoked => "revoked",
             Self::Closed => "closed",
         }
@@ -36,11 +36,11 @@ impl SessionStatus {
     fn can_transition_to(self, next: Self) -> bool {
         matches!(
             (self, next),
-            (Self::Opened, Self::Flagged)
+            (Self::Opened, Self::Warned)
                 | (Self::Opened, Self::Revoked)
                 | (Self::Opened, Self::Closed)
-                | (Self::Flagged, Self::Revoked)
-                | (Self::Flagged, Self::Closed)
+                | (Self::Warned, Self::Revoked)
+                | (Self::Warned, Self::Closed)
                 | (Self::Revoked, Self::Closed)
         )
     }
@@ -148,27 +148,27 @@ pub async fn open_session(
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FlagSessionRequest {
+pub struct WarnSessionRequest {
     pub session_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct FlagSessionResponse {
+pub struct WarnSessionResponse {
     pub session_id: String,
     pub status: String,
 }
 
-pub async fn flag_session(
+pub async fn warn_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(request): Json<FlagSessionRequest>,
-) -> Result<Json<FlagSessionResponse>, EnclaveError> {
+    Json(request): Json<WarnSessionRequest>,
+) -> Result<Json<WarnSessionResponse>, EnclaveError> {
     require_internal_auth(&headers)?;
-    info!("Flagging session {}", request.session_id);
+    info!("Warning session {}", request.session_id);
 
     let mut redis = state.redis.clone();
     let mut session_data = get_session_record(&mut redis, &request.session_id).await?;
-    session_data.transition_to(SessionStatus::Flagged)?;
+    session_data.transition_to(SessionStatus::Warned)?;
 
     let updated_json = serde_json::to_string(&session_data).map_err(|e| {
         error!("Failed to serialize updated session: {}", e);
@@ -180,10 +180,10 @@ pub async fn flag_session(
         .await
         .map_err(|e| {
             error!("Redis error updating session: {}", e);
-            EnclaveError::RedisError(format!("Failed to flag session: {}", e))
+            EnclaveError::RedisError(format!("Failed to warn session: {}", e))
         })?;
 
-    Ok(Json(FlagSessionResponse {
+    Ok(Json(WarnSessionResponse {
         session_id: request.session_id,
         status: session_data.status.as_str().to_string(),
     }))

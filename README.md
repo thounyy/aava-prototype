@@ -109,7 +109,7 @@ curl -X POST "http://127.0.0.1:8080/api/streams/end" \
 # Open a session
 curl -X POST "http://127.0.0.1:8080/api/sessions/open" \
   -H "Content-Type: application/json" \
-  -d '{"viewer_identifier":"viewer1","stream_id":"<STREAM_OBJECT_ID>"}'
+  -d '{"viewer_handle":"viewer1","stream_id":"<STREAM_OBJECT_ID>"}'
 
 # Close a session
 curl -X POST "http://127.0.0.1:8080/api/sessions/close" \

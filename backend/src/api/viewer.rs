@@ -16,30 +16,30 @@ pub fn create_router() -> Router<Arc<AppState>> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AccountHandleRequest {
-    pub account_handle: String,
+pub struct ViewerHandleRequest {
+    pub viewer_handle: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateViewerAccountResponse {
     pub tx_digest: String,
-    pub account_id: String,
+    pub viewer_id: String,
 }
 
 async fn create_viewer_account(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AccountHandleRequest>,
+    Json(req): Json<ViewerHandleRequest>,
 ) -> Result<Json<CreateViewerAccountResponse>, AppError> {
     info!(
-        "Creating viewer account for account_handle {}",
-        req.account_handle
+        "Creating viewer account for viewer_handle {}",
+        req.viewer_handle
     );
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
+    let viewer_id = sui::read::derive_account_id(&req.viewer_handle)?;
 
     let tx = sui::viewer::build_create_account_tx(
         state.sui_client.clone(),
         sui::executor::wallet_address(),
-        req.account_handle,
+        req.viewer_handle,
     )
     .await?;
     let tx_digest = tx.digest().to_string();
@@ -48,7 +48,7 @@ async fn create_viewer_account(
 
     Ok(Json(CreateViewerAccountResponse {
         tx_digest,
-        account_id: account_id.to_string(),
+        viewer_id: viewer_id.to_string(),
     }))
 }
 
@@ -65,10 +65,10 @@ pub struct GetAccountResponse {
 
 async fn get_viewer_account(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AccountHandleRequest>,
+    Json(req): Json<ViewerHandleRequest>,
 ) -> Result<Json<GetAccountResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
-    let account = sui::viewer::get_account(state.sui_client.clone(), account_id).await?;
+    let viewer_id = sui::read::derive_account_id(&req.viewer_handle)?;
+    let account = sui::viewer::get_account(state.sui_client.clone(), viewer_id).await?;
 
     Ok(Json(GetAccountResponse {
         object_id: account.id,
@@ -87,10 +87,10 @@ pub struct AccountExistsResponse {
 
 async fn viewer_account_exists(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<AccountHandleRequest>,
+    Json(req): Json<ViewerHandleRequest>,
 ) -> Result<Json<AccountExistsResponse>, AppError> {
-    let account_id = sui::read::derive_account_id(&req.account_handle)?;
-    let exists = sui::viewer::account_exists(state.sui_client.clone(), account_id).await?;
+    let viewer_id = sui::read::derive_account_id(&req.viewer_handle)?;
+    let exists = sui::viewer::account_exists(state.sui_client.clone(), viewer_id).await?;
 
     Ok(Json(AccountExistsResponse { exists }))
 }

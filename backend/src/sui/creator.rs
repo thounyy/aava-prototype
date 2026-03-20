@@ -13,6 +13,10 @@ use crate::sui::error::SuiError;
 use crate::sui::read;
 use crate::walrus::{blob::CertificateData, tip::TipPayment};
 
+/// Matches `aava::viewer` / `creator::flag_session` (`WARNED` / `REVOKED`).
+pub const SANCTION_KIND_WARN: u8 = 0;
+pub const SANCTION_KIND_REVOKE: u8 = 1;
+
 pub struct CreatorAccount {
     pub id: String,
     pub handle: String,
@@ -359,4 +363,59 @@ pub async fn build_destroy_blob_tx(
         .build(&mut client)
         .await
         .map_err(|e| SuiError::BuildFailed(format!("destroy_blob for {stream_id}: {e}")))
+}
+
+pub async fn build_flag_session_tx(
+    client: Arc<Client>,
+    sender: Address,
+    creator_id: Address,
+    viewer_id: Address,
+    session_id: String,
+    stream_id: Address,
+    kind: u8,
+    reason: String,
+    timestamp_ms: u64,
+) -> Result<Transaction, SuiError> {
+    if kind != SANCTION_KIND_WARN && kind != SANCTION_KIND_REVOKE {
+        return Err(SuiError::InvalidInput(format!(
+            "Invalid sanction kind {kind} (expected {SANCTION_KIND_WARN} warn or {SANCTION_KIND_REVOKE} revoke)"
+        )));
+    }
+
+    let mut client = client.as_ref().clone();
+    let mut builder = TransactionBuilder::new();
+    builder.set_sender(sender);
+
+    tracing::info!("stream_id: {}", stream_id);
+    tracing::info!("creator_id: {}", creator_id);
+    
+    let creator_arg = builder.object(ObjectInput::new(creator_id));
+    let viewer_arg = builder.object(ObjectInput::new(viewer_id));
+    let session_id_arg = builder.pure(&session_id);
+    let stream_id_arg = builder.pure(&stream_id);
+    let kind_arg = builder.pure(&kind);
+    let reason_arg = builder.pure(&reason);
+    let timestamp_arg = builder.pure(&timestamp_ms);
+
+    builder.move_call(
+        Function::new(
+            AAVA_PACKAGE.parse().unwrap(),
+            "creator".parse().unwrap(),
+            "flag_session".parse().unwrap(),
+        ),
+        vec![
+            creator_arg,
+            viewer_arg,
+            session_id_arg,
+            stream_id_arg,
+            kind_arg,
+            reason_arg,
+            timestamp_arg,
+        ],
+    );
+
+    builder
+        .build(&mut client)
+        .await
+        .map_err(|e| SuiError::BuildFailed(format!("flag_session: {e}")))
 }

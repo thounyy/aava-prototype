@@ -68,10 +68,7 @@ public fun new_account(
         owner: option::none(),
         protocol: ctx.sender(),
         sanctions: vector::empty(),
-        metadata: vec_map::from_keys_values(
-            vector["handle"], // TODO: add more metadata if necessary
-            vector[handle]
-        ),
+        metadata: vec_map::empty(),
     };
 
     transfer::share_object(account);

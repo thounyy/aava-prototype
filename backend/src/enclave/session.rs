@@ -68,20 +68,20 @@ pub async fn open_session(
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct EnclaveFlagSessionResponse {
+pub struct EnclaveWarnSessionResponse {
     pub session_id: String,
     pub status: String,
 }
 
-pub async fn flag_session(
+pub async fn warn_session(
     session_id: &str,
-) -> Result<EnclaveFlagSessionResponse, EnclaveError> {
+) -> Result<EnclaveWarnSessionResponse, EnclaveError> {
     let url = enclave_url();
     let token = enclave_internal_token()?;
     let client = reqwest::Client::new();
 
     let response = client
-        .post(format!("{url}/internal/sessions/flag"))
+        .post(format!("{url}/internal/sessions/warn"))
         .header("X-Internal-Token", token)
         .json(&EnclaveSessionIdRequest { session_id: session_id.to_string() })
         .send()
@@ -97,7 +97,7 @@ pub async fn flag_session(
         return Err(EnclaveError::ApiError { status, body });
     }
 
-    let parsed: EnclaveFlagSessionResponse = response.json().await.map_err(|e| {
+    let parsed: EnclaveWarnSessionResponse = response.json().await.map_err(|e| {
         error!("Failed to parse enclave response: {e}");
         EnclaveError::ParseError(e.to_string())
     })?;

@@ -8,11 +8,11 @@ curl -X POST "http://127.0.0.1:8080/api/streams/start" \
 
 curl -X POST "http://127.0.0.1:8080/api/sessions/open" \
   -H "Content-Type: application/json" \
-  -d '{"viewer_identifier":"viewer1","stream_id":"0x0ad25c2b5ad046d4cbeeb5b1471b7a3bcf71c71035754bad0a30e758959597db"}'
+  -d '{"viewer_handle":"viewer1","stream_id":"0xebb21f9d4182296f4ce4605b7429515ed96fc5c8d348ff6a9b18083a141c7117"}'
 
 curl -X POST "http://127.0.0.1:8080/api/streams/end" \
   -H "Content-Type: application/json" \
-  -d '{"account_handle":"thouny","stream_id":"0x0ad25c2b5ad046d4cbeeb5b1471b7a3bcf71c71035754bad0a30e758959597db"}'
+  -d '{"account_handle":"thouny","stream_id":"0xebb21f9d4182296f4ce4605b7429515ed96fc5c8d348ff6a9b18083a141c7117"}'
 
 curl -X POST "http://127.0.0.1:8080/api/viewers/create" \
   -H "Content-Type: application/json" \

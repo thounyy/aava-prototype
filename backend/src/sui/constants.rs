@@ -8,14 +8,12 @@ pub const WALRUS_SYSTEM: &str = "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc7
 pub const WALRUS_SYSTEM_INNER: &str = "0xe567f65413d10d585bbec909f46f11c5fc666061e1ede471b840f3d1cf25eaaa";
 
 // Package
-pub const AAVA_PACKAGE: &str = "0xc596a2a3e215a5d5554f565750391d5dbc66dc16580956294449752861682947";
-pub const ACCOUNT_REGISTRY: &str = "0xc063d1acc690547fe196c0a47d69d8a17557e58614b195a20e3dc2f9e8a8fa34";
-pub const ENCLAVE_CONFIG: &str = "0x703191b24cfa2b8ff5f81101338eb9e6203ebd3c39ee3e46a5794140195aed3b";
-
-// Admin
-pub const PROTOCOL_AUTHORITY: &str = "0xb4801f5e5a22d98f1099374ed5fb98dfe6cf40968cb3d5eb3681b4df7ac6d73b";
-pub const ADMIN_CAP: &str = "0x33a4e1ba8da46188907d996145516a4c962fc7a3bdefac15bee8101d85283aa3";
-pub const ENCLAVE_CAP: &str = "0x9ffba77d5ee9130c3ea45edaec71721018cbad14f5f33b9b355b4b34d293d519";
+pub const AAVA_PACKAGE: &str = "0xb6512dd8f562de568e23d36f5411fde159f76e015269c480a63fc4607ac6ef5d";
+pub const ACCOUNT_REGISTRY: &str = "0x27b933fbcf614a62ad5f7820df0469fbfd15b01c7d088d65ca91833a32d6bc16";
+pub const ENCLAVE_CONFIG: &str = "0xf1c56bbb7fa3996bd140d03f34a9c78f279519e1b587682daa88aaaf8cd8eb97";
+pub const ENCLAVE_CAP: &str = "0xbf5ab1e125737360cf6629ce9f0ea18da3d4502085549586d54f1a9c1ef30a01";
+pub const PROTOCOL_AUTHORITY: &str = "0x59af665bebff2dc00bc12acfee1207e061146f5efb9837c97fa6f4c2ddf37989";
+pub const ADMIN_CAP: &str = "0xc61bab1d16c8ec2b93dde8990c91df4dacc9ce528ba2538152a39e87bea437cb";
 
 pub const ENCLAVE_PACKAGE: &str = "0x8ecf22e78c90c3e32833d76d82415d7e4227ea370bec4efdad4c4830cbda9e49";
 
