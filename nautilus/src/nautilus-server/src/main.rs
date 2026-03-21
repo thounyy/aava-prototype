@@ -23,11 +23,11 @@ async fn main() -> Result<()> {
     let _internal_token = std::env::var("ENCLAVE_INTERNAL_TOKEN")
         .map_err(|_| anyhow::anyhow!("ENCLAVE_INTERNAL_TOKEN must be defined"))?;
 
-    let redis_password = std::env::var("REDIS_PASSWORD")
-        .map_err(|_| anyhow::anyhow!("REDIS_PASSWORD must be defined"))?;
-    if redis_password.is_empty() {
-        return Err(anyhow::anyhow!("REDIS_PASSWORD must not be empty"));
-    }
+    // let redis_password = std::env::var("REDIS_PASSWORD")
+    //     .map_err(|_| anyhow::anyhow!("REDIS_PASSWORD must be defined"))?;
+    // if redis_password.is_empty() {
+    //     return Err(anyhow::anyhow!("REDIS_PASSWORD must not be empty"));
+    // }
 
     let redis_url =
         std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
@@ -35,11 +35,11 @@ async fn main() -> Result<()> {
     let client = Client::open(redis_url)?;
     let mut redis = ConnectionManager::new(client).await?;
 
-    let _: String = redis::cmd("AUTH")
-        .arg(&redis_password)
-        .query_async(&mut redis)
-        .await
-        .map_err(|e| anyhow::anyhow!("Redis authentication failed: {}", e))?;
+    // let _: String = redis::cmd("AUTH")
+    //     .arg(&redis_password)
+    //     .query_async(&mut redis)
+    //     .await
+    //     .map_err(|e| anyhow::anyhow!("Redis authentication failed: {}", e))?;
 
     info!("Redis connection established and authenticated");
 

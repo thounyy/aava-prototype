@@ -73,9 +73,7 @@ pub struct EnclaveWarnSessionResponse {
     pub status: String,
 }
 
-pub async fn warn_session(
-    session_id: &str,
-) -> Result<EnclaveWarnSessionResponse, EnclaveError> {
+pub async fn warn_session(session_id: &str) -> Result<EnclaveWarnSessionResponse, EnclaveError> {
     let url = enclave_url();
     let token = enclave_internal_token()?;
     let client = reqwest::Client::new();
@@ -83,7 +81,9 @@ pub async fn warn_session(
     let response = client
         .post(format!("{url}/internal/sessions/warn"))
         .header("X-Internal-Token", token)
-        .json(&EnclaveSessionIdRequest { session_id: session_id.to_string() })
+        .json(&EnclaveSessionIdRequest {
+            session_id: session_id.to_string(),
+        })
         .send()
         .await?;
 
@@ -121,7 +121,9 @@ pub async fn revoke_session(
     let response = client
         .post(format!("{url}/internal/sessions/revoke"))
         .header("X-Internal-Token", token)
-        .json(&EnclaveSessionIdRequest { session_id: session_id.to_string() })
+        .json(&EnclaveSessionIdRequest {
+            session_id: session_id.to_string(),
+        })
         .send()
         .await?;
 
@@ -157,7 +159,9 @@ pub async fn close_session(session_id: &str) -> Result<EnclaveCloseSessionRespon
     let response = client
         .post(format!("{url}/internal/sessions/close"))
         .header("X-Internal-Token", token)
-        .json(&EnclaveSessionIdRequest { session_id: session_id.to_string() })
+        .json(&EnclaveSessionIdRequest {
+            session_id: session_id.to_string(),
+        })
         .send()
         .await?;
 
@@ -190,9 +194,7 @@ pub struct EnclaveGetSessionResponse {
     pub updated_at: String,
 }
 
-pub async fn get_session(
-    session_id: &str,
-) -> Result<EnclaveGetSessionResponse, EnclaveError> {
+pub async fn get_session(session_id: &str) -> Result<EnclaveGetSessionResponse, EnclaveError> {
     let url = enclave_url();
     let token = enclave_internal_token()?;
     let client = reqwest::Client::new();
@@ -200,7 +202,9 @@ pub async fn get_session(
     let response = client
         .post(format!("{url}/internal/sessions/get"))
         .header("X-Internal-Token", token)
-        .json(&EnclaveSessionIdRequest { session_id: session_id.to_string() })
+        .json(&EnclaveSessionIdRequest {
+            session_id: session_id.to_string(),
+        })
         .send()
         .await?;
 
@@ -219,9 +223,6 @@ pub async fn get_session(
         EnclaveError::ParseError(e.to_string())
     })?;
 
-    info!(
-        "Session {} fetched successfully",
-        parsed.session_id
-    );
+    info!("Session {} fetched successfully", parsed.session_id);
     Ok(parsed)
 }

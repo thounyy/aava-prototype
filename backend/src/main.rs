@@ -26,7 +26,14 @@ async fn main() -> anyhow::Result<()> {
         .merge(api::actions::create_router())
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+    let host = std::env::var("SESSION_ENGINE_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let port: u16 = std::env::var("SESSION_ENGINE_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(8080);
+    let addr: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .map_err(|e| anyhow::anyhow!("Invalid SESSION_ENGINE_HOST/SESSION_ENGINE_PORT: {e}"))?;
     info!("Server starting on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
