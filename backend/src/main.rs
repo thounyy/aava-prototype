@@ -1,3 +1,7 @@
+use axum::http::header;
+use axum::response::Html;
+use axum::response::IntoResponse;
+use axum::routing::get;
 use axum::Router;
 use session_engine::{AppState, api, sui};
 use std::net::SocketAddr;
@@ -19,6 +23,8 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let app = Router::new()
+        .route("/docs", get(swagger_ui))
+        .route("/openapi.json", get(openapi_json))
         .merge(api::creator::create_router())
         .merge(api::viewer::create_router())
         .merge(api::sessions::create_router())
@@ -41,3 +47,48 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+async fn swagger_ui() -> impl IntoResponse {
+    // Swagger UI is loaded from a CDN. If your colleague is behind a network policy
+    // that blocks external access, we can bundle the static files instead.
+    Html::from(OPENAPI_UI_HTML)
+}
+
+async fn openapi_json() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        include_str!("../openapi.json"),
+    )
+}
+
+/// Minimal Swagger UI page pointing at `/openapi.json`.
+///
+/// Note: uses relative path so it works regardless of host/port.
+const OPENAPI_UI_HTML: &str = r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aava API Docs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist/swagger-ui-standalone-preset.js"></script>
+    <script>
+      window.onload = () => {
+        SwaggerUIBundle({
+          url: '/openapi.json',
+          dom_id: '#swagger-ui',
+          presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIStandalonePreset
+          ],
+          layout: 'BaseLayout'
+        });
+      };
+    </script>
+  </body>
+</html>
+"#;

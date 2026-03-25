@@ -1,0 +1,519 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Aava Session Engine API",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": ""
+    }
+  ],
+  "paths": {
+    "/api/creators/create": {
+      "post": {
+        "summary": "Create a creator account on-chain",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatorHandleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Creator created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateCreatorAccountResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/creators/get": {
+      "post": {
+        "summary": "Get creator account details",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatorHandleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Creator details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GetCreatorAccountResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/creators/exists": {
+      "post": {
+        "summary": "Check whether a creator handle exists",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreatorHandleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exists boolean",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountExistsResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/viewers/create": {
+      "post": {
+        "summary": "Create a viewer account on-chain",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ViewerHandleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Viewer created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CreateViewerAccountResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/viewers/get": {
+      "post": {
+        "summary": "Get viewer account details",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ViewerHandleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Viewer details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GetViewerAccountResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/viewers/exists": {
+      "post": {
+        "summary": "Check whether a viewer handle exists",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ViewerHandleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Exists boolean",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountExistsResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/streams/start": {
+      "post": {
+        "summary": "Start a new stream",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StreamStartRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stream started",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StreamStartResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/streams/end": {
+      "post": {
+        "summary": "End a stream (loads sessions from enclave, certifies on-chain, etc.)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/StreamEndRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Stream ended",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StreamEndResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/open": {
+      "post": {
+        "summary": "Open a new session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OpenSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session opened",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OpenSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/close": {
+      "post": {
+        "summary": "Close a session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SessionIdRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session closed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CloseSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/get": {
+      "post": {
+        "summary": "Get session details",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SessionIdRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/GetSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/actions/warn": {
+      "post": {
+        "summary": "Warn a creator (sanction) for a session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SessionSanctionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Warn executed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WarnSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/actions/revoke": {
+      "post": {
+        "summary": "Revoke a creator sanction for a session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SessionSanctionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoke executed",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RevokeSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/actions/status": {
+      "post": {
+        "summary": "Get creator sanction status for a session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SessionStatusRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionStatusResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CreatorHandleRequest": {
+        "type": "object",
+        "required": ["creator_handle"],
+        "properties": {
+          "creator_handle": { "type": "string" }
+        }
+      },
+      "ViewerHandleRequest": {
+        "type": "object",
+        "required": ["viewer_handle"],
+        "properties": {
+          "viewer_handle": { "type": "string" }
+        }
+      },
+      "AccountExistsResponse": {
+        "type": "object",
+        "required": ["exists"],
+        "properties": {
+          "exists": { "type": "boolean" }
+        }
+      },
+      "CreateCreatorAccountResponse": {
+        "type": "object",
+        "required": ["tx_digest", "creator_id"],
+        "properties": {
+          "tx_digest": { "type": "string" },
+          "creator_id": { "type": "string" }
+        }
+      },
+      "GetCreatorAccountResponse": {
+        "type": "object",
+        "required": ["handle", "members", "metadata"],
+        "properties": {
+          "handle": { "type": "string" },
+          "members": { "type": "array", "items": { "type": "string" } },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "CreateViewerAccountResponse": {
+        "type": "object",
+        "required": ["tx_digest", "viewer_id"],
+        "properties": {
+          "tx_digest": { "type": "string" },
+          "viewer_id": { "type": "string" }
+        }
+      },
+      "GetViewerAccountResponse": {
+        "type": "object",
+        "required": ["object_id", "handle", "addr", "protocol", "sanctions", "metadata"],
+        "properties": {
+          "object_id": { "type": "string" },
+          "handle": { "type": "string" },
+          "addr": { "type": ["string", "null"] },
+          "protocol": { "type": "string" },
+          "sanctions": { "type": "array", "items": { "type": "object" } },
+          "metadata": { "type": "object", "additionalProperties": { "type": "string" } }
+        }
+      },
+      "StreamStartRequest": {
+        "type": "object",
+        "required": ["creator_handle"],
+        "properties": {
+          "creator_handle": { "type": "string" }
+        }
+      },
+      "StreamStartResponse": {
+        "type": "object",
+        "required": ["stream_id", "tx_digest"],
+        "properties": {
+          "stream_id": { "type": "string" },
+          "tx_digest": { "type": "string" }
+        }
+      },
+      "StreamEndRequest": {
+        "type": "object",
+        "required": ["creator_handle", "stream_id"],
+        "properties": {
+          "creator_handle": { "type": "string" },
+          "stream_id": { "type": "string" }
+        }
+      },
+      "StreamEndResponse": {
+        "type": "object",
+        "required": ["stream_id", "sessions_count", "init_tx_digest", "finalize_tx_digest"],
+        "properties": {
+          "stream_id": { "type": "string" },
+          "sessions_count": { "type": "integer" },
+          "init_tx_digest": { "type": "string" },
+          "finalize_tx_digest": { "type": "string" }
+        }
+      },
+      "SessionIdRequest": {
+        "type": "object",
+        "required": ["session_id"],
+        "properties": {
+          "session_id": { "type": "string" }
+        }
+      },
+      "OpenSessionRequest": {
+        "type": "object",
+        "required": ["viewer_handle", "stream_id"],
+        "properties": {
+          "viewer_handle": { "type": "string" },
+          "stream_id": { "type": "string" }
+        }
+      },
+      "OpenSessionResponse": {
+        "type": "object",
+        "required": ["session_id", "viewer_id", "stream_id", "status", "created_at"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "viewer_id": { "type": "string" },
+          "stream_id": { "type": "string" },
+          "status": { "type": "string" },
+          "created_at": { "type": "string" }
+        }
+      },
+      "CloseSessionResponse": {
+        "type": "object",
+        "required": ["session_id", "status"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      },
+      "GetSessionResponse": {
+        "type": "object",
+        "required": ["session_id", "viewer_id", "stream_id", "status", "created_at", "updated_at"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "viewer_id": { "type": "string" },
+          "stream_id": { "type": "string" },
+          "status": { "type": "string" },
+          "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "SessionSanctionRequest": {
+        "type": "object",
+        "required": ["session_id", "creator_handle"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "creator_handle": { "type": "string" },
+          "reason": { "type": "string", "default": "" }
+        }
+      },
+      "WarnSessionResponse": {
+        "type": "object",
+        "required": ["session_id", "status", "tx_digest"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "status": { "type": "string" },
+          "tx_digest": { "type": "string" }
+        }
+      },
+      "RevokeSessionResponse": {
+        "type": "object",
+        "required": ["session_id", "status", "tx_digest"],
+        "properties": {
+          "session_id": { "type": "string" },
+          "status": { "type": "string" },
+          "tx_digest": { "type": "string" }
+        }
+      },
+      "SessionStatusRequest": {
+        "type": "object",
+        "required": ["session_id"],
+        "properties": {
+          "session_id": { "type": "string" }
+        }
+      },
+      "SessionStatusResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string" }
+        }
+      }
+    }
+  }
+}
+
