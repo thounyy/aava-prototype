@@ -86,7 +86,7 @@ RUST_LOG=info cargo run
 # Use POST + JSON body; `/api/creators` or `/api/creators/create`
 curl -X POST "http://127.0.0.1:8080/api/creators/create" \
   -H "Content-Type: application/json" \
-  -d '{"account_handle":"your_handle"}'
+  -d '{"creator_handle":"your_handle"}'
 ```
 
 ### 2. Test streams
@@ -95,12 +95,12 @@ curl -X POST "http://127.0.0.1:8080/api/creators/create" \
 # Start a stream
 curl -X POST "http://127.0.0.1:8080/api/streams/start" \
   -H "Content-Type: application/json" \
-  -d '{"account_handle":"your_handle"}'
+  -d '{"creator_handle":"your_handle"}'
 
 # End a stream (registers blob, uploads to Walrus, certifies — all server-side)
 curl -X POST "http://127.0.0.1:8080/api/streams/end" \
   -H "Content-Type: application/json" \
-  -d '{"account_handle":"your_handle","stream_id":"<STREAM_OBJECT_ID>"}'
+  -d '{"creator_handle":"your_handle","stream_id":"<STREAM_OBJECT_ID>"}'
 ```
 
 ### 3. Test sessions

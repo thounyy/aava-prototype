@@ -12,11 +12,10 @@ use sui::{
 };
 use wal::wal::WAL;
 use walrus::system::System;
-use enclave::enclave::Enclave;
 use aava::{
     account_registry::AccountRegistry,
+    enclave::{Self, Enclave},
     protocol_authority::CreatorRequest,
-    blob_id::{Self, BLOB_ID},
     viewer::Account as ViewerAccount,
 };
 
@@ -117,14 +116,15 @@ public fun create_stream(
 
 // --- Walrus ---
 
+/// Must be called from a PTB that chains `0x2::gcp_attestation::verify_gcp_attestation`
+/// as Command 0, then passes its result ([doc]) as the `doc` argument here.
 public fun verify_and_store_blob(
     account: &mut Account,
-    // enclave: &Enclave<BLOB_ID>,
+    enclave: &Enclave,
+    // doc: GcpAttestationDocument, // TODO: uncomment in production
     system: &mut System,
     payment: &mut Coin<WAL>,
     stream_id: ID,
-    timestamp_ms: u64,
-    signature: &vector<u8>,
     blob_id: u256,
     root_hash: u256,
     unencoded_size: u64,
@@ -139,8 +139,8 @@ public fun verify_and_store_blob(
     let stream: &mut Stream = account.id.borrow_mut(key);
     assert!(stream.status == ACTIVE, EStreamNotActive);
 
-    // verify the blob_id bytes from the enclave
-    // if (blob_id::verify(enclave, blob_id, timestamp_ms, signature)) { // TODO: uncomment in production
+    // verify the image digest from the enclave
+    if (enclave::verify(enclave)) { 
         // reserve storage space
         let storage = system.reserve_space(
             encoded_size, 
@@ -163,9 +163,9 @@ public fun verify_and_store_blob(
         
         stream.id.add(BlobKey(), blob);
         stream.status = VERIFIED;
-    // } else {
-    //     stream.status = INVALID;
-    // }
+    } else {
+        stream.status = INVALID;
+    }
 }
 
 public fun certify_blob(
