@@ -1,0 +1,20 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored.
+
+project_id = "your-gcp-project-id"
+
+# Required: same token used by backend ENCLAVE_INTERNAL_TOKEN.
+enclave_internal_token = "replace-me"
+
+# Required: Redis URL reachable from the Confidential Space VM.
+# Example: "redis://10.0.0.5:6379"
+redis_url = "redis://127.0.0.1:6379"
+
+# Optional:
+# image_tag = "latest"
+# region = "us-central1"
+# zone = "us-central1-b"
+# allowed_source_ranges = ["0.0.0.0/0"]
+# create_firewall_rule = true
+# rust_log = "info"
+

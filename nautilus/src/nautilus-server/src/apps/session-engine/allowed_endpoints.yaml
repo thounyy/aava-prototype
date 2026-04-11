@@ -1,5 +1,0 @@
-# Allowed endpoints for session-engine app
-# Currently no external API calls are needed for session creation
-# Future: Add Walrus upload endpoints when implementing batch proof generation
-endpoints: []
-

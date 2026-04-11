@@ -1,0 +1,25 @@
+# GCP Confidential Spaces container image for the Nautilus session engine server.
+
+FROM rust:1.81-bookworm AS build
+WORKDIR /src
+
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+
+RUN cargo build --locked --release
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/target/release/session-enclave /session-enclave
+
+# Confidential Space: declare env vars that can be injected via tee-env-*
+LABEL "tee.launch_policy.allow_env_override"="ENCLAVE_INTERNAL_TOKEN,REDIS_URL,RUST_LOG"
+
+ENV ENCLAVE_INTERNAL_TOKEN=
+ENV REDIS_URL=redis://127.0.0.1:6379
+ENV RUST_LOG=info
+
+EXPOSE 3000/tcp
+ENTRYPOINT ["/session-enclave"]
+

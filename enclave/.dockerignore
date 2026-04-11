@@ -1,0 +1,10 @@
+**/target/
+.git/
+out/
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!terraform.tfvars.example
+.DS_Store
+.github/
