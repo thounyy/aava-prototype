@@ -1,6 +1,8 @@
 # Aava Session Engine
 
-Aava is a programmable video layer that leverages AI-powered compression and decentralized networks. This repository contains the session engine implementation using Nautilus (TEE) for secure, verifiable session management.
+Aava is a programmable video layer that leverages AI-powered compression and decentralized networks. This repository contains the session engine implementation: a **backend** orchestrator and an **enclave** service for secure, verifiable session management (TEE-style deployment path).
+
+**Full stack details (on-chain/off-chain, flows, env):** **[ARCHITECTURE.md](ARCHITECTURE.md)**
 
 ## Architecture
 
@@ -20,18 +22,16 @@ Aava is a programmable video layer that leverages AI-powered compression and dec
        │ ENCLAVE_URL
        ▼
 ┌─────────────────┐
-│  Nautilus       │  (Port 3000)
-│  Enclave (TEE)  │
+│  Enclave        │  (Port 3000)
+│  session_enclave│
 └──────┬──────────┘
        │
-       │ Authenticated Write
-       │ (Password Protected)
+       │ Session writes (enclave only)
        ▼
 ┌─────────────────┐
 │     Redis       │
 │   (Sessions)    │
 │  localhost:6379 │
-│  Auth Required  │
 └─────────────────┘
 ```
 
@@ -41,32 +41,30 @@ Aava is a programmable video layer that leverages AI-powered compression and dec
 
 Before starting backend and enclave:
 
-1. **Start Redis with a password** – Redis must use `requirepass` so the enclave can authenticate:
-   ```bash
-   # One-off with password
-   redis-server --requirepass your-secure-password
+1. **Redis** – Default dev setup is unauthenticated `redis://localhost:6379`. For production-style auth, put the password in **`REDIS_URL`** (e.g. `redis://:your-password@127.0.0.1:6379/`) or use `requirepass` and the same URL form.
 
-   # Or add to redis.conf: requirepass your-secure-password
-   ```
-
-2. **Set environment variables** – Both backend and enclave need `ENCLAVE_INTERNAL_TOKEN`. Enclave also needs `REDIS_PASSWORD` (must match Redis's `requirepass`).
+2. **Set environment variables** – Backend and enclave both need **`ENCLAVE_INTERNAL_TOKEN`**.
 
 3. **Start order**: Redis → Enclave → Backend
 
 ### 1. Run Redis
 
 ```bash
-redis-server --requirepass your-secure-password
-# Test: redis-cli -a your-secure-password ping  → PONG
+# Dev (no password)
+redis-server
+
+# Or with requirepass — then set REDIS_URL to redis://:your-password@127.0.0.1:6379/
+# redis-server --requirepass your-secure-password
+# redis-cli -a your-secure-password ping  → PONG
 ```
 
 ### 2. Run the Enclave
 
 ```bash
-cd nautilus/src/nautilus-server
+cd enclave
 export ENCLAVE_INTERNAL_TOKEN=your-shared-secret
-export REDIS_PASSWORD=your-secure-password   # Same as Redis requirepass
-RUST_LOG=info cargo run --bin nautilus-server
+export REDIS_URL=redis://localhost:6379   # optional; include :password@ if Redis uses requirepass
+RUST_LOG=info cargo run
 ```
 
 ### 3. Run the Backend
@@ -143,10 +141,8 @@ GET session:your-session-id
 The architecture ensures data integrity through multiple layers:
 
 1. **Redis Access Control**
-   - Redis is bound to `localhost` only (no external access)
-   - Password authentication required (`requirepass`)
-   - Only the enclave has the password (via `REDIS_PASSWORD` env var)
-   - Other processes on the machine cannot access Redis without the password
+   - In production, bind Redis to private networks and require authentication (password in **`REDIS_URL`** or TLS)
+   - Only the **enclave** should hold `REDIS_URL` with credentials; the backend does not connect to Redis
 
 2. **Enclave Isolation**
    - The enclave (TEE) is the **only** process that writes to Redis
@@ -173,8 +169,8 @@ The architecture ensures data integrity through multiple layers:
 ### Security Best Practices
 
 **Production Deployment:**
-- ✅ Use strong Redis password (32+ characters, random)
-- ✅ Store `REDIS_PASSWORD` in secure secret management (not in code)
+- ✅ Use strong Redis credentials (32+ characters, random) embedded in `REDIS_URL` or secret-backed config
+- ✅ Store Redis URL / secrets in secret management (not in code)
 - ✅ Run Redis in isolated network/VPC
 - ✅ Enable Redis TLS for encrypted connections
 - ✅ Use Redis ACLs to restrict commands
@@ -182,8 +178,8 @@ The architecture ensures data integrity through multiple layers:
 - ✅ Run enclave in TEE (AWS Nitro Enclaves, Intel SGX, etc.)
 
 **Development:**
-- ⚠️ `REDIS_PASSWORD` is required (no unauthenticated Redis)
-- ⚠️ Don't commit passwords to git
+- ⚠️ Default local Redis may be unauthenticated; restrict before exposing beyond localhost
+- ⚠️ Don't commit credentials to git
 
 ## Configuration
 
@@ -194,14 +190,13 @@ The architecture ensures data integrity through multiple layers:
 - `ENCLAVE_INTERNAL_TOKEN`: shared secret sent to enclave as `X-Internal-Token` (**required**)
 
 **Enclave:**
-- `REDIS_URL`: Redis connection URL (default: `redis://localhost:6379`)
-- `REDIS_PASSWORD`: Redis password (**required**)
+- `REDIS_URL`: Redis connection URL (default: `redis://localhost:6379`; embed password in URL if needed)
 - `ENCLAVE_INTERNAL_TOKEN`: shared secret expected from backend in `X-Internal-Token` (**required**)
 
 ### Ports
 
 - **Backend**: `8080` (configurable in `backend/src/main.rs`)
-- **Enclave**: `3000` (configurable in `nautilus/src/nautilus-server/src/main.rs`)
+- **Enclave**: `3000` (see `enclave/src/main.rs`)
 
 ## Next Steps
 
